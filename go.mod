@@ -9,7 +9,6 @@ require (
 	github.com/bogdanfinn/utls v1.7.7-barnius
 	github.com/cbeuw/connutil v1.0.1
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.2
 	github.com/pion/dtls/v3 v3.0.10
 	github.com/pion/logging v0.2.4
@@ -27,6 +26,7 @@ require (
 	github.com/bdandy/go-socks4 v1.2.3 // indirect
 	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
 	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
+	github.com/google/btree v1.1.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.16 // indirect
 	github.com/pion/stun/v3 v3.1.1 // indirect
@@ -36,4 +36,7 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/time v0.10.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c // indirect
 )

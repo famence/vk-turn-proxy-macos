@@ -1,0 +1,29 @@
+{
+  "_comment": "Скопируйте в config.json и заполните своими значениями. Режимы: legacy | srtp | srtp-wrap | srtp-wrap-a. В режиме srtp-wrap-a блок wireguard не нужен — сервер выдаёт конфиг сам (нужен только wrap_a_password).",
+
+  "vk_link": "https://vk.ru/call/join/ЗАМЕНИТЕ_НА_ССЫЛКУ_ЗВОНКА",
+  "peer_addr": "203.0.113.10:56000",
+  "mode": "srtp",
+  "use_udp": false,
+  "num_conns": 30,
+
+  "turn_server": "",
+  "turn_port": "",
+  "wrap_key_hex": "",
+  "wrap_a_password": "",
+
+  "wireguard": {
+    "private_key": "БАЗА64_ПРИВАТНОГО_КЛЮЧА_КЛИЕНТА",
+    "peer_public_key": "БАЗА64_ПУБЛИЧНОГО_КЛЮЧА_СЕРВЕРА",
+    "preshared_key": "",
+    "address": "192.168.102.3/24",
+    "dns": "1.1.1.1",
+    "mtu": 1280,
+    "persistent_keepalive": 25
+  },
+
+  "socks_listen": "127.0.0.1:1080",
+  "http_listen": "127.0.0.1:1087",
+
+  "cookie_header": ""
+}
