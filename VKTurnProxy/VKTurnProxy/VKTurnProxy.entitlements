@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The container app installs/activates the packet-tunnel SYSTEM extension
+	     via OSSystemExtensionRequest (see SystemExtensionManager.swift). -->
+	<key>com.apple.developer.system-extension.install</key>
+	<true/>
+
+	<!-- Manage the packet-tunnel VPN configuration (NETunnelProviderManager).
+	     The "-systemextension" suffix is required for the system-extension
+	     packaging used on macOS (vs the bare "packet-tunnel-provider" on iOS). -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider-systemextension</string>
+	</array>
+
+	<!-- Shared container for vpn.log, creds-pool.json, vk_profile.json and the
+	     lastTurnServerIP hand-off. $(TeamIdentifierPrefix) expands to your team
+	     id + "." at build time, so this resolves to "<TeamID>.com.vkturnproxy.mac"
+	     — which MUST equal AppGroup.identifier and the same key in
+	     PacketTunnel.entitlements. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)com.vkturnproxy.mac</string>
+	</array>
+
+	<!-- Shared keychain group for the VKAuth logged-in cookie (VKCookieStore),
+	     read by the extension at startTunnel. $(AppIdentifierPrefix) expands to
+	     the team id + "." → "<TeamID>.com.vkturnproxy.shared" (= AppGroup.keychainAccessGroup). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.vkturnproxy.shared</string>
+	</array>
+</dict>
+</plist>

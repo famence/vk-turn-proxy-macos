@@ -1,0 +1,126 @@
+name: VKTurnProxy
+options:
+  bundleIdPrefix: com.vkturnproxy.mac
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.2"
+
+settings:
+  base:
+    # Replace with your own Apple Developer Team ID before building/signing.
+    # Must match the team the App Group + keychain group are registered to,
+    # and the CDMQ33VFQC prefix in AppGroup.keychainAccessGroup / entitlements.
+    DEVELOPMENT_TEAM: CDMQ33VFQC
+    CODE_SIGN_STYLE: Automatic
+    # Swift concurrency + the shared @MainActor TunnelManager compile cleanly
+    # at Swift 5 language mode; matches the iOS project.
+    SWIFT_VERSION: "5.0"
+
+targets:
+  VKTurnProxy:
+    type: application
+    platform: macOS
+    sources:
+      - path: VKTurnProxy
+    info:
+      path: VKTurnProxy/Info.plist
+      properties:
+        CFBundleDisplayName: "VK Turn Proxy"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        # We only ship a menu-bar-less standard window app; no Dock-less agent.
+        LSApplicationCategoryType: public.app-category.utilities
+        # Same export-compliance declaration as the iOS build: only standard
+        # crypto via Apple system APIs (Security.framework, Network.framework
+        # DTLS/TLS, CommonCrypto), all export-exempt.
+        ITSAppUsesNonExemptEncryption: false
+        # 1-Click Connection Link import: clicking a vkturnproxy://import?data=…
+        # (or amurcanov's wdtt://…) URL launches the app and delivers the URL
+        # via .onOpenURL → SettingsView. Same schemes as iOS.
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.vkturnproxy.mac
+            CFBundleURLSchemes:
+              - vkturnproxy
+              - wdtt
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vkturnproxy.mac
+        CODE_SIGN_ENTITLEMENTS: VKTurnProxy/VKTurnProxy.entitlements
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: 1
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The main app links the xcframework (calls wgProbeVKCreds for the
+        # pre-bootstrap captcha probe) via the bridging header, exactly like
+        # the iOS build. Note: unlike the App-Store iOS constraint, a macOS
+        # app bundle CAN embed a static-archive-backed xcframework — but the
+        # symbols are only needed at link time here (the extension is where
+        # the tunnel actually runs), so we link without embedding.
+        SWIFT_OBJC_BRIDGING_HEADER: VKTurnProxy/BridgeHeader.h
+        # resolv is needed for the CFHost / DNS resolution the main app does
+        # (resolveVKHosts) and by the Go dialer.
+        OTHER_LDFLAGS:
+          - "-lresolv"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/../WireGuardBridge/build"
+    dependencies:
+      # Embeds the .systemextension into Contents/Library/SystemExtensions
+      # (xcodegen creates the "Embed System Extensions" copy-files phase for a
+      # system-extension dependency).
+      - target: PacketTunnel
+        embed: true
+      - sdk: NetworkExtension.framework
+      # OSSystemExtensionRequest lives in SystemExtensions.framework — the app
+      # uses it to activate the packet-tunnel system extension.
+      - sdk: SystemExtensions.framework
+      # CoreWLAN provides the SSID for the [PathMonitor] diagnostic in the
+      # extension; the main app links it transitively but declare it here too.
+      - sdk: CoreWLAN.framework
+      - framework: ../WireGuardBridge/build/WireGuardTURN.xcframework
+        embed: false
+
+  PacketTunnel:
+    # macOS packet-tunnel providers distributed outside the Mac App Store must
+    # be SYSTEM extensions (Apple TN3134). This produces a .systemextension
+    # bundle embedded under Contents/Library/SystemExtensions and activated at
+    # runtime via OSSystemExtensionRequest (see SystemExtensionManager.swift).
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: PacketTunnel
+      # SharedLogger / OSLogReader / VKCookieStore / AppGroup are compiled into
+      # BOTH targets — the extension writes the same App Group log file, reads
+      # its own os_log ring buffer, and reads the shared-keychain VKAuth cookie.
+      - path: VKTurnProxy/SharedLogger.swift
+      - path: VKTurnProxy/OSLogReader.swift
+      - path: VKTurnProxy/VKCookieStore.swift
+      - path: VKTurnProxy/AppGroup.swift
+    info:
+      path: PacketTunnel/Info.plist
+      properties:
+        CFBundleDisplayName: "VK Turn Proxy Tunnel"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PacketTunnelProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vkturnproxy.mac.tunnel
+        CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: 1
+        SKIP_INSTALL: YES
+        SWIFT_OBJC_BRIDGING_HEADER: PacketTunnel/BridgeHeader.h
+        OTHER_LDFLAGS:
+          - "-lresolv"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)/../WireGuardBridge/build"
+    dependencies:
+      - framework: ../WireGuardBridge/build/WireGuardTURN.xcframework
+        embed: true
+      - sdk: NetworkExtension.framework
+      - sdk: CoreWLAN.framework
