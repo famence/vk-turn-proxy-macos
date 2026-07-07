@@ -1,0 +1,41 @@
+# Build artifacts
+WireGuardBridge/build/
+# Bare-name Go binaries produced by `go build .` without -o.
+/WireGuardBridge/WireGuardBridge
+/turn_bw_test
+/turn_bw_server
+/tools/turn_srtp_server/turn_srtp_server
+/tools/turn_srtp_test/turn_srtp_test
+
+# Xcode
+*.xcuserdata
+xcuserdata/
+*.xcworkspace
+DerivedData/
+build/
+*.app
+*.pkg
+*.dSYM.zip
+*.dSYM
+# xcodegen regenerates the project from project.yml
+VKTurnProxy/VKTurnProxy.xcodeproj/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Go
+vendor/
+*.test
+
+# App Store Connect / notarization credentials
+AppStoreConnect.env
+notarize.env
+
+# Private local-only notes
+.private-notes/
+
+# local scripts
+release.sh
+install.sh
