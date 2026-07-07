@@ -61,10 +61,29 @@ open VKTurnProxy/VKTurnProxy.xcodeproj
 Подробности (Team ID, entitlements, подтверждение системного расширения,
 notarization) — в [docs/setup.md](docs/setup.md).
 
+## Вариант без Network Extension (SOCKS5/HTTP для Surge)
+
+Если не хочется возиться с системным расширением, платным аккаунтом Apple и
+подписью — есть лёгкий вариант: программа `vk-turn-socks` поднимает **тот же
+туннель тем же движком**, но терминирует WireGuard в userspace и отдаёт наружу
+локальный **SOCKS5/HTTP** прокси. Вы подключаетесь к нему из Surge.
+
+Это обычный исполняемый файл (без Xcode, без Network Extension, без аккаунта
+Apple). Готовые бинарники — в [`dist/`](dist) (Apple Silicon и Intel), инструкция
+и настройка Surge — в [docs/socks.md](docs/socks.md).
+
+```shell
+cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
+xattr -dr com.apple.quarantine ./dist/vk-turn-socks-darwin-arm64
+./dist/vk-turn-socks-darwin-arm64 -config config.json
+# в Surge: Proxy → SOCKS5 → 127.0.0.1:1080
+```
+
 ## Документация
 
 - [Как это работает / что нужно для работы / режимы](docs/setup.md)
-- [Сборка и установка на macOS](docs/setup.md#сборка-и-установка-на-macos)
+- [Сборка и установка полноценного .app на macOS](docs/setup.md#сборка-и-установка-на-macos)
+- [Лёгкий вариант: SOCKS5/HTTP прокси для Surge (без Network Extension)](docs/socks.md)
 
 ## Credits
 
