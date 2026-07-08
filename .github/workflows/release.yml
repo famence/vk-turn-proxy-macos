@@ -18,15 +18,25 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  # Tags pushed by GITHUB_TOKEN from another workflow do NOT trigger `push: tags`.
+  # Chain the release build after auto-tag completes instead.
+  workflow_run:
+    workflows: ["Auto tag after merge"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       # xcodegen (project.yml → .xcodeproj) targets Xcode 16; select a matching
       # Xcode so xcodebuild can open the generated project.
@@ -49,6 +59,28 @@ jobs:
           xcodebuild -version
           go version
 
+      - name: Resolve release tag
+        id: reltag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" && "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --tags --force
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            sha="${{ github.event.workflow_run.head_sha }}"
+          else
+            sha="${GITHUB_SHA}"
+          fi
+          tag="$(git tag --points-at "${sha}" --list 'v*' | head -n 1 || true)"
+          if [[ -z "${tag}" ]]; then
+            echo "No v* tag found at ${sha}"
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - name: Build DMG + CLI artifacts
         run: scripts/package_dmg.sh
 
@@ -63,9 +95,9 @@ jobs:
             dist/SHA256SUMS.txt
 
       - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.reltag.outputs.tag }}
           draft: true
           files: |
             dist/VK-Turn-Proxy-Agent.dmg

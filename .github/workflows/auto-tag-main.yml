@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,16 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: Create and push next semver tag
+        id: tag
         shell: bash
         run: |
           set -euo pipefail
 
           git fetch --tags --force
 
-          # If HEAD already has a release tag, do nothing (safe on reruns).
+          # If HEAD already has a release tag, reuse it (safe on reruns).
           existing="$(git tag --points-at HEAD --list 'v*' | head -n 1 || true)"
           if [[ -n "${existing}" ]]; then
             echo "HEAD already tagged: ${existing}"
+            echo "tag=${existing}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -49,3 +52,4 @@ jobs:
           git tag -a "${next}" -m "Release ${next}"
           git push origin "${next}"
           echo "Created ${next}"
+          echo "tag=${next}" >> "$GITHUB_OUTPUT"
