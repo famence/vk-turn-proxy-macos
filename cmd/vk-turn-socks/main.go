@@ -39,6 +39,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -90,8 +91,8 @@ type WGConfig struct {
 }
 
 func main() {
-	cfgPath := flag.String("config", "config.json", "path to JSON config file")
-	importSrc := flag.String("import", "", "generate config.json from an iOS connection link (vkturnproxy://… or bare base64) or a Full-Backup/connection JSON file, then exit. Writes to -config.")
+	cfgPath := flag.String("config", "", "path to JSON config file (default: ./config.json, else ~/Library/Application Support/VKTurnProxy/config.json)")
+	importSrc := flag.String("import", "", "generate config.json from an iOS connection link (vkturnproxy://… or bare base64) or a Full-Backup/connection JSON file, then exit. Writes to -config (or the standard app-support path).")
 	socksFlag := flag.String("socks", "", "SOCKS5 listen address (overrides config; e.g. 127.0.0.1:1080)")
 	httpFlag := flag.String("http", "", "HTTP proxy listen address (overrides config; empty disables)")
 	controlFlag := flag.String("control", "", "control API listen address (overrides config; e.g. 127.0.0.1:1099)")
@@ -101,9 +102,19 @@ func main() {
 	flag.Parse()
 
 	// -import: build a config.json from an existing iOS connection link / backup
-	// and exit. The easiest path if you already set up the iOS app.
+	// and exit. Writes to the explicit -config path, else the standard
+	// app-support path (which the service + menu-bar agent also use).
 	if *importSrc != "" {
-		summary, err := importConfig(*importSrc, *cfgPath)
+		out := *cfgPath
+		if out == "" {
+			out = appSupportConfigPath()
+			if out != "" {
+				_ = os.MkdirAll(filepath.Dir(out), 0o755)
+			} else {
+				out = "config.json"
+			}
+		}
+		summary, err := importConfig(*importSrc, out)
 		if err != nil {
 			log.Fatalf("import: %v", err)
 		}
@@ -111,10 +122,12 @@ func main() {
 		return
 	}
 
-	cfg, err := loadConfig(*cfgPath)
+	resolvedCfg := resolveConfigPath(*cfgPath)
+	cfg, err := loadConfig(resolvedCfg)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	log.Printf("using config: %s", resolvedCfg)
 	if *socksFlag != "" {
 		cfg.SocksListen = *socksFlag
 	}
@@ -146,6 +159,35 @@ func main() {
 	if err := run(cfg, logLevel, *captchaStdin); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
+}
+
+// appSupportConfigPath returns the standard macOS config location shared by the
+// CLI, the launchd service, and the menu-bar agent, or "" if $HOME is unknown.
+func appSupportConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, "Library", "Application Support", "VKTurnProxy", "config.json")
+}
+
+// resolveConfigPath picks the config file to load. An explicit -config wins.
+// Otherwise prefer ./config.json (handy when running from a checkout), then
+// fall back to the standard app-support path so a service/agent install and a
+// bare `vk-turn-socks` in the terminal use the very same file.
+func resolveConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if _, err := os.Stat("config.json"); err == nil {
+		return "config.json"
+	}
+	if p := appSupportConfigPath(); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "config.json" // yields a clear "not found" error below
 }
 
 func loadConfig(path string) (*CLIConfig, error) {
