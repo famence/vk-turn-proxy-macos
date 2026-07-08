@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 // Live view of the current session's engine log (agent.log). Tails the file
@@ -7,6 +8,7 @@ struct LogsWindow: View {
     @State private var text = ""
     @State private var autoScroll = true
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let maxTailBytes = 256 * 1024
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,10 +45,40 @@ struct LogsWindow: View {
             .padding(8)
         }
         .frame(minWidth: 620, minHeight: 420)
-        .onAppear { text = controller.readLog() }
+        .onAppear {
+            text = tailText(at: controller.logURL, maxBytes: maxTailBytes)
+        }
         .onReceive(timer) { _ in
-            let latest = controller.readLog()
-            if latest != text { text = latest }
+            let url = controller.logURL
+            Task {
+                let latest = await Task.detached(priority: .utility) {
+                    tailText(at: url, maxBytes: maxTailBytes)
+                }.value
+                if latest != text { text = latest }
+            }
+        }
+    }
+
+    private func tailText(at url: URL, maxBytes: Int) -> String {
+        guard maxBytes > 0 else { return "" }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let sizeAny = attrs[.size],
+              let size = sizeAny as? NSNumber else {
+            return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+
+        let fileSize = size.int64Value
+        if fileSize <= 0 { return "" }
+        let start = max(Int64(0), fileSize - Int64(maxBytes))
+
+        guard let h = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? h.close() }
+        do {
+            try h.seek(toOffset: UInt64(start))
+            let data = try h.readToEnd() ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return ""
         }
     }
 }
