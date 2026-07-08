@@ -46,6 +46,12 @@ socks:
 menubar:
 	scripts/build_menubar.sh
 
+# Install/manage the background launchd service (macOS only). Pass ACTION=...
+# e.g. `make service ACTION=install` | start | stop | status | logs | uninstall.
+ACTION ?= install
+service:
+	scripts/service.sh $(ACTION)
+
 clean:
 	$(MAKE) -C WireGuardBridge clean
 	rm -rf VKTurnProxy/build VKTurnProxy/VKTurnProxy.xcodeproj
