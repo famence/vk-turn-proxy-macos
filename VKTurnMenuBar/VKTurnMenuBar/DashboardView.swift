@@ -158,7 +158,7 @@ struct DashboardView: View {
                 Text(title).font(.caption2).foregroundColor(.secondary)
             }
             Text(rate)
-                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.5)
             Text(total)
@@ -182,19 +182,19 @@ struct DashboardView: View {
     /// Hover shows `help` as a tooltip; `showInfo` adds a small info glyph.
     private func infoRow(_ label: String, _ value: String, help: String?, showInfo: Bool = false) -> some View {
         HStack(spacing: 6) {
-            Text(label).font(.callout).foregroundColor(.secondary)
+            Text(label).font(.body).foregroundColor(.secondary)
             if showInfo {
                 Image(systemName: "info.circle")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.secondary.opacity(0.6))
             }
             Spacer(minLength: 10)
             Text(value)
-                .font(.callout).fontWeight(.medium)
+                .font(.body).fontWeight(.semibold)
                 .monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.6)
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 7)
         .contentShape(Rectangle())
         .help(help ?? "")
     }
