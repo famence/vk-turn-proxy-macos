@@ -33,7 +33,7 @@ struct DashboardView: View {
             footer
         }
         .padding(16)
-        .frame(width: 320)
+        .frame(width: 340)
     }
 
     // MARK: - Sections
@@ -81,18 +81,34 @@ struct DashboardView: View {
     }
 
     private var stats: some View {
-        VStack(spacing: 8) {
-            HStack {
-                stat("↓ Down", speed(controller.rxRate), sub: bytes(controller.rxBytes))
-                stat("↑ Up", speed(controller.txRate), sub: bytes(controller.txBytes))
+        VStack(spacing: 12) {
+            // Hero: live speed. Two equal-width tiles with a light gradient and a
+            // large, easy-to-read rate.
+            HStack(spacing: 10) {
+                speedTile(title: "Download", symbol: "arrow.down",
+                          rate: speed(controller.rxRate), total: bytes(controller.rxBytes),
+                          tint: .blue)
+                speedTile(title: "Upload", symbol: "arrow.up",
+                          rate: speed(controller.txRate), total: bytes(controller.txBytes),
+                          tint: .green)
             }
-            HStack {
-                stat("Conns", "\(controller.activeConns)/\(controller.totalConns)", sub: "active/total")
-                stat("Pool", "\(controller.poolFilled)/\(controller.poolWithCreds)/\(controller.poolSize)", sub: "avail/creds/size")
-            }
-            HStack {
-                stat("Uptime", uptime(controller.uptimeSec), sub: nil)
-                stat("Relay", controller.relayIP.isEmpty ? "—" : controller.relayIP, sub: "keep DIRECT")
+
+            // Details: borderless table — label left, value right.
+            VStack(spacing: 0) {
+                infoRow("Connections",
+                        "\(controller.activeConns) / \(controller.totalConns)",
+                        help: "Active / total proxy sessions.")
+                Divider().opacity(0.35)
+                infoRow("Credential pool",
+                        "\(controller.poolFilled) / \(controller.poolWithCreds) / \(controller.poolSize)",
+                        help: "Ready / with-credentials / capacity.")
+                Divider().opacity(0.35)
+                infoRow("Uptime", uptime(controller.uptimeSec), help: nil)
+                Divider().opacity(0.35)
+                infoRow("Relay (keep DIRECT)",
+                        controller.relayIP.isEmpty ? "—" : controller.relayIP,
+                        help: "VK's TURN relay the tunnel is using. Add IP-CIDR,\(controller.relayIP.isEmpty ? "<relay>" : controller.relayIP)/32,DIRECT in Surge so the proxy's own traffic to VK bypasses the tunnel instead of looping back through it.",
+                        showInfo: true)
             }
         }
     }
@@ -133,23 +149,54 @@ struct DashboardView: View {
         }
     }
 
-    private func stat(_ title: String, _ value: String, sub: String?) -> some View {
-        VStack(spacing: 2) {
-            Text(title).font(.caption2).foregroundColor(.secondary)
-            Text(value).font(.system(.body, design: .monospaced)).fontWeight(.medium)
-                .lineLimit(1).minimumScaleFactor(0.6)
-            if let sub { Text(sub).font(.caption2).foregroundColor(.secondary) }
+    /// A live-speed tile: label, big rate, and a session total below. Filled with
+    /// a light diagonal gradient in `tint` so the pair reads at a glance.
+    private func speedTile(title: String, symbol: String, rate: String, total: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.caption2.weight(.bold)).foregroundColor(tint)
+                Text(title).font(.caption2).foregroundColor(.secondary)
+            }
+            Text(rate)
+                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.5)
+            Text(total)
+                .font(.caption2).monospacedDigit().foregroundColor(.secondary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.primary.opacity(0.04))               // light, unobtrusive
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(LinearGradient(colors: [tint.opacity(0.18), tint.opacity(0.05)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)  // thin hairline
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(tint.opacity(0.16), lineWidth: 0.5)
         )
+    }
+
+    /// A borderless table row: label on the left, value pinned to the right.
+    /// Hover shows `help` as a tooltip; `showInfo` adds a small info glyph.
+    private func infoRow(_ label: String, _ value: String, help: String?, showInfo: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.callout).foregroundColor(.secondary)
+            if showInfo {
+                Image(systemName: "info.circle")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.callout).fontWeight(.medium)
+                .monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .help(help ?? "")
     }
 
     private var statusColor: Color {
@@ -163,7 +210,7 @@ struct DashboardView: View {
         if bps >= 1_048_576 { return String(format: "%.1f MB/s", bps / 1_048_576) }
         if bps >= 1024 { return String(format: "%.0f KB/s", bps / 1024) }
         if bps > 0 { return String(format: "%.0f B/s", bps) }
-        return "0"
+        return "0 KB/s"
     }
 
     private func bytes(_ n: Int64) -> String {
