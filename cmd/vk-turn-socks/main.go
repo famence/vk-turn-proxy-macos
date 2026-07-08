@@ -91,6 +91,7 @@ type WGConfig struct {
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "path to JSON config file")
+	importSrc := flag.String("import", "", "generate config.json from an iOS connection link (vkturnproxy://… or bare base64) or a Full-Backup/connection JSON file, then exit. Writes to -config.")
 	socksFlag := flag.String("socks", "", "SOCKS5 listen address (overrides config; e.g. 127.0.0.1:1080)")
 	httpFlag := flag.String("http", "", "HTTP proxy listen address (overrides config; empty disables)")
 	controlFlag := flag.String("control", "", "control API listen address (overrides config; e.g. 127.0.0.1:1099)")
@@ -98,6 +99,17 @@ func main() {
 	captchaStdin := flag.Bool("captcha-stdin", false, "prompt on stdin to paste a captcha success_token when one is required")
 	verbose := flag.Bool("v", false, "verbose WireGuard logging")
 	flag.Parse()
+
+	// -import: build a config.json from an existing iOS connection link / backup
+	// and exit. The easiest path if you already set up the iOS app.
+	if *importSrc != "" {
+		summary, err := importConfig(*importSrc, *cfgPath)
+		if err != nil {
+			log.Fatalf("import: %v", err)
+		}
+		fmt.Println(summary)
+		return
+	}
 
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
