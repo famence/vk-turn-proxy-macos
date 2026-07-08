@@ -537,18 +537,27 @@ func warnIfNoRx(p *proxy.Proxy) {
 		if s.RxBytes > 0 {
 			return // handshake completed, traffic flowing
 		}
-		if !warned && time.Now().After(deadline) && s.TxBytes > 0 {
+		// Fire once the tunnel is clearly up-but-silent: rx stays 0 while
+		// either WG is sending handshakes (tx>0) or the tunnel keeps going
+		// stale and reconnecting (reconnects>0, the churn seen with many
+		// conns). Both mean the server isn't answering WireGuard.
+		if !warned && time.Now().After(deadline) && (s.TxBytes > 0 || s.Reconnects > 0) {
 			warned = true
-			log.Printf("WARNING: tunnel transport is up but WireGuard got NO reply from the server " +
-				"(tx>0, rx=0, reconnect loop). This is almost always a WireGuard key/address mismatch:\n" +
-				"  • wireguard.peer_public_key must be the SERVER's WG public key;\n" +
-				"  • the PUBLIC key of your wireguard.private_key must be registered as a [Peer] on the\n" +
-				"    WireGuard server, with AllowedIPs covering wireguard.address (=your tunnel IP);\n" +
-				"  • if you generated a NEW key for this Mac (e.g. quick_link.py -gen-peer-key), you must\n" +
-				"    add the printed [Peer] block to the server and restart WireGuard;\n" +
-				"  • don't run iOS and this Mac at the same time with the SAME key+address — use a\n" +
-				"    distinct key and tunnel IP per device;\n" +
-				"  • surest fix: -import the exact working iOS config (see docs/config.md).")
+			log.Printf("WARNING: the SRTP+TURN transport to your server is UP, but WireGuard gets NO\n" +
+				"reply (rx=0, sessions go stale and reconnect on a loop). The 486 quota errors and\n" +
+				"climbing goroutines/memory are just fallout from that reconnect storm — fix the\n" +
+				"WireGuard side and they stop. This is a WireGuard key/address mismatch:\n" +
+				"  • wireguard.peer_public_key must be the WG SERVER's public key — NOT the peer's.\n" +
+				"    In 3x-ui this is the INBOUND's public key (the WireGuard inbound itself), shown\n" +
+				"    at the inbound level; the per-peer public key is a DIFFERENT value and is the\n" +
+				"    #1 mistake here.\n" +
+				"  • wireguard.private_key must be THIS peer's private key, and that peer's AllowedIPs\n" +
+				"    in 3x-ui must cover wireguard.address (your tunnel IP, e.g. 192.168.102.7/32).\n" +
+				"  • the vk-turn-proxy server's -connect must point at the 3x-ui WireGuard inbound's\n" +
+				"    listen port (it does for your working iOS setup — use the SAME inbound).\n" +
+				"  • don't run iOS + this Mac at once with the SAME key/IP — give each its own peer.\n" +
+				"  • fastest check: turn the iOS client OFF and -import its exact working config\n" +
+				"    (its key is already accepted by the server). See docs/config.md.")
 		}
 	}
 }
