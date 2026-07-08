@@ -20,6 +20,12 @@ targets:
     platform: macOS
     sources:
       - path: VKTurnMenuBar
+        # The Go engine is injected into the bundle by build_menubar.sh after
+        # xcodebuild (a no-extension Mach-O isn't reliably classified as a
+        # resource by xcodegen). Exclude it here so it can't land in a compile
+        # phase or bloat/confuse the project.
+        excludes:
+          - "Resources/vk-turn-socks"
     info:
       path: VKTurnMenuBar/Info.plist
       properties:

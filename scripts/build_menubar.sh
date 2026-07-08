@@ -76,6 +76,33 @@ if [[ ! -d "$APP" ]]; then
   APP="$(/usr/bin/find "$DERIVED/Build/Products/Release" -maxdepth 1 -name '*.app' -print -quit || true)"
 fi
 [[ -d "$APP" ]] || { echo "ERROR: built app not found under $DERIVED/Build/Products/Release" >&2; exit 1; }
+
+# Inject the engine + example config into the bundle EXPLICITLY. We don't rely
+# on Xcode/xcodegen to copy the no-extension Mach-O `vk-turn-socks` (it doesn't
+# classify it as a resource, which produced a tiny app with no engine inside).
+echo "==> Embedding vk-turn-socks + config.example.json into the bundle…"
+APP_RES="$APP/Contents/Resources"
+mkdir -p "$APP_RES"
+cp "$RES_DIR/vk-turn-socks" "$APP_RES/vk-turn-socks"
+chmod +x "$APP_RES/vk-turn-socks"
+cp "$RES_DIR/config.example.json" "$APP_RES/config.example.json"
+
+# Re-sign: modifying Resources invalidates the signature. Ad-hoc unless a team
+# is given (this project ships unsigned; a real Developer-ID/notarized build
+# would re-sign + notarize here).
+CODESIGN_ID="-"
+[[ -n "${TEAM_ID:-}" ]] && CODESIGN_ID="${CODESIGN_IDENTITY:-Developer ID Application}"
+codesign --force --deep --sign "$CODESIGN_ID" "$APP" 2>/dev/null || \
+  codesign --force --deep --sign - "$APP"
+
+# Verify the engine actually made it in — fail loudly otherwise.
+if [[ ! -x "$APP_RES/vk-turn-socks" ]]; then
+  echo "ERROR: vk-turn-socks was not embedded into the app bundle." >&2
+  exit 1
+fi
+ENGINE_SZ=$(du -h "$APP_RES/vk-turn-socks" | cut -f1)
+echo "==> Embedded engine: $ENGINE_SZ at $APP_RES/vk-turn-socks"
+
 echo
 echo "==> Done: $APP"
 echo

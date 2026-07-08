@@ -34,6 +34,11 @@ if [[ ! -d "$APP" ]]; then
   APP="$(/usr/bin/find "$REL_DIR" -maxdepth 1 -name '*.app' -print -quit || true)"
 fi
 [[ -d "$APP" ]] || { echo "ERROR: built app not found under $REL_DIR" >&2; exit 1; }
+# Guard against shipping an app without the engine (the 252 KB DMG bug).
+[[ -x "$APP/Contents/Resources/vk-turn-socks" ]] || {
+  echo "ERROR: engine missing from app bundle ($APP/Contents/Resources/vk-turn-socks)." >&2
+  exit 1
+}
 
 echo "==> Assembling DMG…"
 STAGE="$(mktemp -d)"
