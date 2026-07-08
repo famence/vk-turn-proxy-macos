@@ -1,122 +1,78 @@
 # VK TURN Proxy — macOS
 
 Порт [vk-turn-proxy-ios](https://github.com/anton48/vk-turn-proxy-ios) на macOS.
-То же самое приложение, тот же движок «под капотом», те же режимы работы — но
-нативное для Mac.
+Строит туннель к вашему серверу поверх [TURN relay](https://www.rfc-editor.org/info/rfc8656/)
+ВКонтакте — работает даже там, где фильтруется трафик. Движок (Go: VK-креды,
+TURN, DTLS/SRTP/WRAP/WRAP-A, встроенный WireGuard, авто-капча) — тот же, что в
+iOS-версии.
 
-Приложение разработано в исследовательских и образовательных целях. Оно строит
-туннель (VPN) между устройством и вашим сервером. Туннель поднимается поверх
-[TURN relay](https://www.rfc-editor.org/info/rfc8656/) (по умолчанию — relay
-[ВКонтакте](https://vk.com), либо любой другой TURN relay из настроек).
-Использование TURN relay как промежуточного звена позволяет работать в том числе
-в условиях фильтрации трафика в корпоративной сети или у сотового провайдера.
+Два варианта на выбор:
 
-## Что взято от iOS-версии без изменений
+| | Приложение (.app) | Прокси для Surge |
+|---|---|---|
+| Что делает | Системный VPN на весь Mac | Локальный SOCKS5/HTTP, подключаете Surge |
+| Нужен Apple Developer аккаунт | Да (платный) | Нет |
+| Установка | Сборка в Xcode | Скачать `.dmg`, перетащить в Applications |
 
-«Под капотом» — ровно тот же код, что и в iOS-приложении:
+Для большинства проще **прокси для Surge** — он ставится в пару кликов и не
+требует аккаунта Apple.
 
-- **Ядро на Go** (`pkg/proxy`, `pkg/turnbind`, `WireGuardBridge`) — получение VK
-  credentials, аллокации TURN, DTLS/SRTP/WRAP/WRAP-A транспорты, встроенный
-  WireGuard, пул credential'ов, авто-решение капчи (PoW + slider), watchdog,
-  smart-pause на смену сети. Скомпилировано в `WireGuardTURN.xcframework`.
-- **Вся бизнес-логика на Swift** — `TunnelManager`, `BackupManager`,
-  `ConfigValidation`, `CredCache`, `VKProfileCache`, `VKCookieStore`,
-  модели конфигурации, парсинг connection-link / `wdtt://`, экспорт/импорт бэкапов.
-- **Тот же протокол между Swift и Go** — те же C-функции
-  (`wgStartVKBootstrap`, `wgWaitBootstrapReady`, `wgAttachWireGuard`,
-  `wgProbeVKCreds`, …) и та же последовательность запуска туннеля.
+## Установка (прокси для Surge)
 
-## Что отличается от iOS (и почему)
+1. Скачайте `VK-Turn-Proxy-Agent.dmg` из [Releases](../../releases)
+   (универсальный — Apple Silicon и Intel).
+2. Откройте, перетащите **VK Turn Proxy Agent** в **Applications**, запустите.
+3. Первый запуск: правый клик по приложению → **Open** (сборка без подписи).
+4. В иконке в трее → **Edit config…**, заполните настройки
+   ([docs/config.md](docs/config.md)).
 
-macOS — не iOS, поэтому изменилась только «обёртка» вокруг ядра:
+Только CLI без интерфейса — тоже в Releases (`vk-turn-socks-darwin-arm64.zip` /
+`-amd64.zip`).
 
-| iOS | macOS | Почему |
-|-----|-------|--------|
-| Packet Tunnel как **app extension** | Packet Tunnel как **system extension** | На macOS packet-tunnel-провайдер при распространении вне Mac App Store должен быть системным расширением (Apple TN3134). Требует однократного подтверждения пользователем. |
-| UIKit-обёртки (`UIActivityViewController`, `UIDocumentPicker`, `UITextView`, `UIPasteboard`) | AppKit (`NSSavePanel`, `NSOpenPanel`, `NSTextView`, `NSPasteboard`) | UIKit на Mac недоступен; логика та же, элементы нативные. |
-| `NEHotspotNetwork` для SSID в диагностике | `CoreWLAN` | На Mac имя Wi-Fi-сети читается через CoreWLAN. |
-| App Group `group.com.vkturnproxy.app` | App Group `<TeamID>.com.vkturnproxy.mac` | macOS-контейнеры App Group должны быть с префиксом Team ID. |
-| Лимит памяти Go 35 МБ (jetsam iOS) | 512 МБ | На Mac нет per-process jetsam-потолка для расширения; поднятый лимит возвращает полноскоростную работу GC. |
+## Автоматический режим (без участия)
 
-Всё остальное (UI, экраны, настройки, режимы, бэкапы, авто-ссылки) — 1:1 с iOS.
+В панели трея включите **Auto (failover)** и **Launch at login**. Дальше всё
+само: агент стартует при входе в систему, поднимает туннель только когда прямой
+интернет недоступен, и гасит его, когда доступ возвращается.
 
-## Сборка
+В Surge добавьте `fallback`-группу, чтобы маршрут переключался автоматически:
 
-Нужен Mac с Xcode 16.2+, Go 1.25.5+ и [`xcodegen`](https://github.com/yonaskolb/XcodeGen)
-(`brew install go xcodegen`).
+```ini
+[Proxy]
+VKTurn = socks5, 127.0.0.1, 1080, udp-relay=true
 
-```shell
-# 1) собрать Go-ядро в WireGuardBridge/build/WireGuardTURN.xcframework
-make bridge
+[Proxy Group]
+Auto = fallback, DIRECT, VKTurn, url=http://www.gstatic.com/generate_204, interval=30, timeout=3
 
-# 2) сгенерировать Xcode-проект из project.yml
-make project
-
-# 3) открыть проект, задать свой Team ID и собрать/запустить
-open VKTurnProxy/VKTurnProxy.xcodeproj
+[Rule]
+DOMAIN,www.gstatic.com,DIRECT
+PROCESS-NAME,vk-turn-socks,DIRECT
+IP-CIDR,127.0.0.1/32,DIRECT
+FINAL,Auto
 ```
 
-Или всё сразу: `make all`, затем открыть проект в Xcode.
-
-Подробности (Team ID, entitlements, подтверждение системного расширения,
-notarization) — в [docs/setup.md](docs/setup.md).
-
-## Вариант без Network Extension (SOCKS5/HTTP для Surge)
-
-Если не хочется возиться с системным расширением, платным аккаунтом Apple и
-подписью — есть лёгкий вариант: программа `vk-turn-socks` поднимает **тот же
-туннель тем же движком**, но терминирует WireGuard в userspace и отдаёт наружу
-локальный **SOCKS5/HTTP** прокси. Вы подключаетесь к нему из Surge.
-
-Это обычный исполняемый файл (без Xcode, без Network Extension, без аккаунта
-Apple).
-
-**Установка в пару кликов:** скачайте `VK-Turn-Proxy-Agent.dmg` из
-[Releases](../../releases) (универсальный — arm64 + Intel), перетащите
-«VK Turn Proxy Agent» в Applications и запустите — появится иконка в трее
-со статистикой и тумблерами. Первый запуск (без подписи): правый клик →
-Open. Подробно — [docs/automation.md](docs/automation.md#установка-приложения-в-пару-кликов).
-
-Только CLI без UI — тоже в Releases (`vk-turn-socks-darwin-arm64.zip` /
-`-amd64.zip`) или соберите `make socks`. Настройка Surge — в
-[docs/socks.md](docs/socks.md), настройка конфига (в т.ч. **где взять
-`private_key`**) — в [docs/config.md](docs/config.md).
-
-Если уже настроено iOS-приложение — перенос в одну команду:
-`./vk-turn-socks -import 'vkturnproxy://import?data=…'`
-(конфиг ляжет в `~/Library/Application Support/VKTurnProxy/config.json`).
-
-```shell
-cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
-xattr -dr com.apple.quarantine ./dist/vk-turn-socks-darwin-arm64
-./dist/vk-turn-socks-darwin-arm64 -config config.json
-# в Surge: Proxy → SOCKS5 → 127.0.0.1:1080 (udp-relay=true)
-```
-
-Возможности этого варианта:
-- **SOCKS5 TCP + UDP** (UDP ASSOCIATE — работает QUIC/HTTP3, DNS-over-UDP) и HTTP-прокси.
-- **Три способа запуска** — терминал, фоновый launchd-сервис ([`scripts/service.sh`](scripts/service.sh)) и **менюбар-агент со статистикой** (`VK Turn Proxy Agent.app`, `scripts/build_menubar.sh`). Подробно — [docs/automation.md](docs/automation.md).
-- **Авто-failover с Surge** — DIRECT пока прямой интернет жив, автоматически в туннель когда пропал, обратно на DIRECT когда вернулся (нативная `fallback`-группа Surge + режим Auto в агенте). См. [docs/automation.md](docs/automation.md#авто-failover-с-surge-direct--vk-turn).
-- **Ручное решение капчи** — авто по умолчанию; если не вышло, агент откроет WebView для ручного решения (или CLI `-captcha-stdin`, или вход по `cookie_header`).
-- **Прямой выход без петель** — сервис всегда ходит к VK TURN напрямую (userspace-прокси не меняет маршрутизацию; дайлер блокирует loopback/self). Для Surge в enhanced-mode добавьте `PROCESS-NAME,vk-turn-socks,DIRECT` + IP релея — подробности в [docs/socks.md](docs/socks.md#4-гарантия-прямого-выхода-нет-замыкания-на-себя).
-- **Стандартный путь конфига** — `~/Library/Application Support/VKTurnProxy/config.json` (общий для CLI, сервиса и агента).
+Подробнее — [docs/automation.md](docs/automation.md).
 
 ## Документация
 
-- [Как это работает / что нужно для работы / режимы](docs/setup.md)
-- [Сборка и установка полноценного .app на macOS](docs/setup.md#сборка-и-установка-на-macos)
-- [Лёгкий вариант: SOCKS5/HTTP прокси для Surge (без Network Extension)](docs/socks.md)
+- [Настройка конфига (где взять ключи)](docs/config.md)
+- [Установка, запуск, авто-режим, Surge](docs/automation.md)
+- [CLI-запуск и Surge](docs/socks.md)
+- [Полное приложение (.app) с системным VPN](docs/setup.md)
 
-## Credits
+## Сборка из исходников
 
-Порт [anton48/vk-turn-proxy-ios](https://github.com/anton48/vk-turn-proxy-ios),
-который основан на [vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy)
-by [cacggghp](https://github.com/cacggghp).
+Нужны macOS 13+, Xcode 16.2+, Go 1.25.5+, `xcodegen` (`brew install go xcodegen`).
+
+```shell
+make socks       # headless CLI-бинарь
+scripts/build_menubar.sh    # менюбар-приложение (.app)
+scripts/package_dmg.sh      # .dmg + CLI-зипы (как в релизе)
+```
+
+Релизы собираются автоматически (GitHub Actions) при пуше тега `vX.Y.Z`.
 
 ## License
 
-[GNU General Public License v3.0](LICENSE) (GPL-3.0) — как производная от
-[vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy) (GPL-3.0).
-
-Файлы с заголовком `SPDX-License-Identifier` дополнительно доступны под указанной
-там лицензией (например, MIT); проект в целом — GPL-3.0.
+[GPL-3.0](LICENSE), как производная от
+[vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy).
