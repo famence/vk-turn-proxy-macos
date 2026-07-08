@@ -1,2 +1,2 @@
-df813b66f21cd5e7128281bda8a6bfaa9690d8a069cedb296a67463df75f74d3  vk-turn-socks-darwin-amd64
-a4857a4ef045b426129ad9bd571785b47486678c149276b2cc49753096d36a23  vk-turn-socks-darwin-arm64
+cacc0e788f0e9b570a4e942e01faa2fb7519c802bce3056c461d013be6949604  vk-turn-socks-darwin-amd64
+40d6d74f38de7072ca6974b10fb9dfbcabf6f5ac6b60dfd7b191a6c3f68c3dda  vk-turn-socks-darwin-arm64

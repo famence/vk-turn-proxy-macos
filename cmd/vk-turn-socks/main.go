@@ -137,6 +137,10 @@ func main() {
 	logLevel := device.LogLevelError
 	if *verbose {
 		logLevel = device.LogLevelVerbose
+	} else {
+		// Quiet the engine's iOS-extension diagnostic spam (memstats /
+		// HEARTBEAT / pion refresh / per-conn dumps). -v shows everything.
+		installQuietLogger()
 	}
 
 	if err := run(cfg, logLevel, *captchaStdin); err != nil {
