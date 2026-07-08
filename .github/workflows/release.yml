@@ -24,9 +24,16 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # xcodegen (project.yml → .xcodeproj) targets Xcode 16; select a matching
+      # Xcode so xcodebuild can open the generated project.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Set up Go
         uses: actions/setup-go@v5
