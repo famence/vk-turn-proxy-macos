@@ -76,8 +76,14 @@ Apple). Готовые бинарники — в [`dist/`](dist) (Apple Silicon 
 cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
 xattr -dr com.apple.quarantine ./dist/vk-turn-socks-darwin-arm64
 ./dist/vk-turn-socks-darwin-arm64 -config config.json
-# в Surge: Proxy → SOCKS5 → 127.0.0.1:1080
+# в Surge: Proxy → SOCKS5 → 127.0.0.1:1080 (udp-relay=true)
 ```
+
+Возможности этого варианта:
+- **SOCKS5 TCP + UDP** (UDP ASSOCIATE — работает QUIC/HTTP3, DNS-over-UDP) и HTTP-прокси.
+- **Менюбар-агент** (`VK Turn Proxy Agent.app`) — статус/Start/Stop в строке меню; сборка `scripts/build_menubar.sh` (нужен только Go + Xcode CLT, без аккаунта Apple).
+- **Ручное решение капчи** — авто по умолчанию; если не вышло, агент откроет WebView для ручного решения (или CLI `-captcha-stdin`, или вход по `cookie_header`).
+- **Прямой выход без петель** — сервис всегда ходит к VK TURN напрямую (userspace-прокси не меняет маршрутизацию; дайлер блокирует loopback/self). Для Surge в enhanced-mode добавьте `PROCESS-NAME,vk-turn-socks,DIRECT` + IP релея — подробности в [docs/socks.md](docs/socks.md#4-гарантия-прямого-выхода-нет-замыкания-на-себя).
 
 ## Документация
 
