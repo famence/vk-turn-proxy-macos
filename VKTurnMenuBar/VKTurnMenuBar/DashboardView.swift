@@ -5,6 +5,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var controller: AgentController
     @Environment(\.openWindow) private var openWindow
+    @State private var showRelayHint = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -105,10 +106,15 @@ struct DashboardView: View {
                 Divider().opacity(0.35)
                 infoRow("Uptime", uptime(controller.uptimeSec), help: nil)
                 Divider().opacity(0.35)
-                infoRow("Relay (keep DIRECT)",
-                        controller.relayIP.isEmpty ? "—" : controller.relayIP,
-                        help: "VK's TURN relay the tunnel is using. Add IP-CIDR,\(controller.relayIP.isEmpty ? "<relay>" : controller.relayIP)/32,DIRECT in Surge so the proxy's own traffic to VK bypasses the tunnel instead of looping back through it.",
-                        showInfo: true)
+                relayRow
+                if showRelayHint {
+                    Text("TURN relay VK. Добавь в Surge правило IP-CIDR,\(controller.relayIP.isEmpty ? "<relay>" : controller.relayIP)/32,DIRECT — так служебный трафик к релею идёт напрямую и не зацикливается через прокси.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
@@ -199,6 +205,32 @@ struct DashboardView: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .help(help ?? "")
+    }
+
+    private var relayRow: some View {
+        HStack(spacing: 6) {
+            Text("Relay (keep DIRECT)")
+                .font(.title3)
+                .foregroundColor(.secondary)
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showRelayHint.toggle()
+                }
+            } label: {
+                Image(systemName: showRelayHint ? "info.circle.fill" : "info.circle")
+                    .font(.body)
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("Показать пояснение по keep DIRECT")
+
+            Spacer(minLength: 10)
+            Text(controller.relayIP.isEmpty ? "—" : controller.relayIP)
+                .font(.title3).fontWeight(.bold)
+                .monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .padding(.vertical, 10)
     }
 
     private var statusColor: Color {

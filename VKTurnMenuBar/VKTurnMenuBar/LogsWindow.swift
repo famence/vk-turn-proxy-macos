@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 // Live view of the current session's engine log (agent.log). Tails the file
@@ -6,7 +7,7 @@ struct LogsWindow: View {
     @ObservedObject var controller: AgentController
     @State private var text = ""
     @State private var autoScroll = true
-    @State private var refreshTask: Task<Void, Never>?
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let maxTailBytes = 256 * 1024
 
     var body: some View {
@@ -45,24 +46,39 @@ struct LogsWindow: View {
         }
         .frame(minWidth: 620, minHeight: 420)
         .onAppear {
-            // Tail, and do the file I/O off the main thread.
-            text = controller.readLogTail(maxBytes: maxTailBytes)
-            refreshTask?.cancel()
-            refreshTask = Task {
-                while !Task.isCancelled {
-                    let latest = await Task.detached(priority: .utility) {
-                        controller.readLogTail(maxBytes: maxTailBytes)
-                    }.value
-                    if latest != text {
-                        await MainActor.run { text = latest }
-                    }
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
+            text = tailText(at: controller.logURL, maxBytes: maxTailBytes)
+        }
+        .onReceive(timer) { _ in
+            let url = controller.logURL
+            Task {
+                let latest = await Task.detached(priority: .utility) {
+                    tailText(at: url, maxBytes: maxTailBytes)
+                }.value
+                if latest != text { text = latest }
             }
         }
-        .onDisappear {
-            refreshTask?.cancel()
-            refreshTask = nil
+    }
+
+    private func tailText(at url: URL, maxBytes: Int) -> String {
+        guard maxBytes > 0 else { return "" }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let sizeAny = attrs[.size],
+              let size = sizeAny as? NSNumber else {
+            return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+
+        let fileSize = size.int64Value
+        if fileSize <= 0 { return "" }
+        let start = max(Int64(0), fileSize - Int64(maxBytes))
+
+        guard let h = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? h.close() }
+        do {
+            try h.seek(toOffset: UInt64(start))
+            let data = try h.readToEnd() ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return ""
         }
     }
 }
