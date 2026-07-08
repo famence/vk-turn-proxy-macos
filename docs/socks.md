@@ -36,6 +36,17 @@ CGO_ENABLED=0 go build ./cmd/vk-turn-socks`).
 
 ## Настройка
 
+Подробная пошаговая инструкция «что откуда брать» (включая **где взять
+`private_key`**) — в [docs/config.md](config.md). Если у вас уже настроено
+iOS-приложение, самый быстрый путь — импорт готовой ссылки:
+
+```shell
+# из iOS connection-link (vkturnproxy://…) или из Full-Backup .json:
+./vk-turn-socks-darwin-arm64 -import 'vkturnproxy://import?data=…' -config config.json
+```
+
+Либо вручную из шаблона:
+
 ```shell
 cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
 ./vk-turn-socks-darwin-arm64 -config config.json

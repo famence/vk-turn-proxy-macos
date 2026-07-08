@@ -70,7 +70,11 @@ notarization) — в [docs/setup.md](docs/setup.md).
 
 Это обычный исполняемый файл (без Xcode, без Network Extension, без аккаунта
 Apple). Готовые бинарники — в [`dist/`](dist) (Apple Silicon и Intel), инструкция
-и настройка Surge — в [docs/socks.md](docs/socks.md).
+и настройка Surge — в [docs/socks.md](docs/socks.md), а подробная настройка
+конфига (в т.ч. **где взять `private_key`**) — в [docs/config.md](docs/config.md).
+
+Если уже настроено iOS-приложение — перенос в одну команду:
+`./vk-turn-socks -import 'vkturnproxy://import?data=…' -config config.json`.
 
 ```shell
 cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
