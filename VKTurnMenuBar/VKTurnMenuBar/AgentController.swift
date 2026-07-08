@@ -260,6 +260,34 @@ final class AgentController: ObservableObject {
         (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
     }
 
+    /// Tail the log file for UI display. Reading the whole file every second can
+    /// freeze the menu-bar app once the log grows large.
+    func readLogTail(maxBytes: Int = 256 * 1024) -> String {
+        guard maxBytes > 0 else { return "" }
+        guard let attrs = try? fm.attributesOfItem(atPath: logURL.path),
+              let sizeAny = attrs[.size],
+              let size = sizeAny as? NSNumber else {
+            return readLog()
+        }
+
+        let fileSize = size.int64Value
+        if fileSize <= 0 { return "" }
+
+        let start = max(Int64(0), fileSize - Int64(maxBytes))
+        guard let h = try? FileHandle(forReadingFrom: logURL) else { return "" }
+        defer { try? h.close() }
+
+        do {
+            try h.seek(toOffset: UInt64(start))
+            let data = try h.readToEnd() ?? Data()
+            // Best-effort UTF-8 decode; if we started mid-rune, replacement chars
+            // are fine for a log viewer.
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return ""
+        }
+    }
+
     func clearLog() {
         try? "".write(to: logURL, atomically: true, encoding: .utf8)
     }

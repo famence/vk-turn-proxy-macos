@@ -6,7 +6,8 @@ struct LogsWindow: View {
     @ObservedObject var controller: AgentController
     @State private var text = ""
     @State private var autoScroll = true
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var refreshTask: Task<Void, Never>?
+    private let maxTailBytes = 256 * 1024
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,10 +44,25 @@ struct LogsWindow: View {
             .padding(8)
         }
         .frame(minWidth: 620, minHeight: 420)
-        .onAppear { text = controller.readLog() }
-        .onReceive(timer) { _ in
-            let latest = controller.readLog()
-            if latest != text { text = latest }
+        .onAppear {
+            // Tail, and do the file I/O off the main thread.
+            text = controller.readLogTail(maxBytes: maxTailBytes)
+            refreshTask?.cancel()
+            refreshTask = Task {
+                while !Task.isCancelled {
+                    let latest = await Task.detached(priority: .utility) {
+                        controller.readLogTail(maxBytes: maxTailBytes)
+                    }.value
+                    if latest != text {
+                        await MainActor.run { text = latest }
+                    }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+        }
+        .onDisappear {
+            refreshTask?.cancel()
+            refreshTask = nil
         }
     }
 }
