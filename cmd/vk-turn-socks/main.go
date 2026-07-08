@@ -326,6 +326,11 @@ func run(cfg *CLIConfig, logLevel int, captchaStdin bool) error {
 		log.Printf("tunnel up")
 	}
 
+	// Watch for the "handshake sent, nothing comes back" symptom (WireGuard
+	// key/peer mismatch) and warn once — the transport can be fully up while
+	// WG stays silent, which otherwise looks like a mysterious "no internet".
+	go warnIfNoRx(p)
+
 	// Anti-loop: the tunnel dialer must never dial our own listeners or
 	// loopback. Register every local listener as forbidden.
 	dialer := newTunnelDialer(tnet, []string{cfg.SocksListen, cfg.HTTPListen, cfg.ControlListen})
@@ -513,6 +518,39 @@ func bootstrapHint(cfg *CLIConfig) string {
 		"     run  ./vk-turn-socks -import '<link-or-file>' -config config.json  (see docs/config.md).\n" +
 		"If VK forces an unsolvable captcha instead, use -captcha-stdin, the menu-bar agent,\n" +
 		"or set cookie_header."
+}
+
+// warnIfNoRx detects the "WireGuard handshake unanswered" state: the SRTP+TURN
+// transport is up and WireGuard keeps sending 148-byte handshake initiations
+// (tx climbs), but the server never replies (rx stays 0), so the tunnel goes
+// "stale" and reconnects on a loop. That's almost always a WireGuard key/peer
+// mismatch on the server side (the server silently drops handshakes from an
+// unknown public key). We warn once so this doesn't look like a generic
+// "no internet". Returns as soon as any bytes are received (all good).
+func warnIfNoRx(p *proxy.Proxy) {
+	deadline := time.Now().Add(25 * time.Second)
+	t := time.NewTicker(3 * time.Second)
+	defer t.Stop()
+	warned := false
+	for range t.C {
+		s := p.GetStats()
+		if s.RxBytes > 0 {
+			return // handshake completed, traffic flowing
+		}
+		if !warned && time.Now().After(deadline) && s.TxBytes > 0 {
+			warned = true
+			log.Printf("WARNING: tunnel transport is up but WireGuard got NO reply from the server " +
+				"(tx>0, rx=0, reconnect loop). This is almost always a WireGuard key/address mismatch:\n" +
+				"  • wireguard.peer_public_key must be the SERVER's WG public key;\n" +
+				"  • the PUBLIC key of your wireguard.private_key must be registered as a [Peer] on the\n" +
+				"    WireGuard server, with AllowedIPs covering wireguard.address (=your tunnel IP);\n" +
+				"  • if you generated a NEW key for this Mac (e.g. quick_link.py -gen-peer-key), you must\n" +
+				"    add the printed [Peer] block to the server and restart WireGuard;\n" +
+				"  • don't run iOS and this Mac at the same time with the SAME key+address — use a\n" +
+				"    distinct key and tunnel IP per device;\n" +
+				"  • surest fix: -import the exact working iOS config (see docs/config.md).")
+		}
+	}
 }
 
 func humanBytes(n int64) string {
