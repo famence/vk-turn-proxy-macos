@@ -1,0 +1,78 @@
+name: Release
+
+# Builds the installable artifacts on a macOS runner and attaches them to the
+# GitHub Release when you push a tag like v1.0.0. You can also run it manually
+# (workflow_dispatch) to get the artifacts without publishing a release.
+#
+# Artifacts:
+#   • VK-Turn-Proxy-Agent.dmg        — universal menu-bar app (drag to Applications)
+#   • vk-turn-socks-darwin-arm64.zip — headless CLI (Apple Silicon)
+#   • vk-turn-socks-darwin-amd64.zip — headless CLI (Intel)
+#   • SHA256SUMS.txt
+#
+# The build is UNSIGNED (ad-hoc) unless you add signing. First launch on the
+# user's Mac then needs a right-click → Open (documented in the release notes).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.5"
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          go version
+
+      - name: Build DMG + CLI artifacts
+        run: scripts/package_dmg.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk-turn-proxy-macos
+          path: |
+            dist/VK-Turn-Proxy-Agent.dmg
+            dist/vk-turn-socks-darwin-arm64.zip
+            dist/vk-turn-socks-darwin-amd64.zip
+            dist/SHA256SUMS.txt
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/VK-Turn-Proxy-Agent.dmg
+            dist/vk-turn-socks-darwin-arm64.zip
+            dist/vk-turn-socks-darwin-amd64.zip
+            dist/SHA256SUMS.txt
+          body: |
+            ## VK Turn Proxy — macOS
+
+            **Приложение (в пару кликов):** скачайте `VK-Turn-Proxy-Agent.dmg`, откройте, перетащите «VK Turn Proxy Agent» в Applications и запустите. Иконка появится в строке меню. При первом запуске (сборка не подписана) — правый клик по приложению → **Open**, либо:
+            `xattr -dr com.apple.quarantine "/Applications/VK Turn Proxy Agent.app"`
+
+            DMG — **универсальный** (Apple Silicon + Intel), выбирать архитектуру не нужно.
+
+            **Только CLI (без UI):** `vk-turn-socks-darwin-arm64.zip` (Apple Silicon) или `vk-turn-socks-darwin-amd64.zip` (Intel).
+
+            Настройка конфига — [docs/config.md](https://github.com/${{ github.repository }}/blob/main/docs/config.md). Способы запуска и авто-failover — [docs/automation.md](https://github.com/${{ github.repository }}/blob/main/docs/automation.md).

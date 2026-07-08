@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Packet-tunnel provider capability for a macOS SYSTEM extension.
+	     The "-systemextension" suffix distinguishes it from the iOS
+	     app-extension value "packet-tunnel-provider". -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider-systemextension</string>
+	</array>
+
+	<!-- Same shared container as the main app (see VKTurnProxy.entitlements).
+	     Team-ID-prefixed so the app and this system extension resolve the SAME
+	     ~/Library/Group Containers/<TeamID>.com.vkturnproxy.mac directory. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)com.vkturnproxy.mac</string>
+	</array>
+
+	<!-- Same shared keychain group as the main app so startTunnel can read the
+	     VKAuth cookie. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.vkturnproxy.shared</string>
+	</array>
+</dict>
+</plist>

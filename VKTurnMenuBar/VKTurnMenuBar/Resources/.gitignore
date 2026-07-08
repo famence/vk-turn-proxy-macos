@@ -1,0 +1,3 @@
+# The vk-turn-socks binary is dropped here at build time by scripts/build_menubar.sh
+# (built for the host arch / universal). Do not commit the binary.
+vk-turn-socks
