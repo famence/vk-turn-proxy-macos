@@ -77,6 +77,14 @@ struct DashboardView: View {
             .buttonStyle(.borderedProminent)
             .tint(controller.isRunning ? .red : .accentColor)
         }
+
+        Toggle(isOn: Binding(
+            get: { controller.launchAtLogin },
+            set: { controller.setLaunchAtLogin($0) }
+        )) {
+            Text("Launch at login")
+        }
+        .toggleStyle(.switch)
     }
 
     private var stats: some View {

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 // AgentController manages the `vk-turn-socks` subprocess and its localhost
 // control API, and publishes live stats for the menu-bar dashboard.
@@ -36,8 +37,9 @@ final class AgentController: ObservableObject {
     @Published var uptimeSec: Int64 = 0
 
     // Auto mode (failover): when on, the agent starts the tunnel only while the
-    // direct internet path is down, and stops it when direct recovers.
-    @Published var autoMode: Bool = UserDefaults.standard.bool(forKey: "autoMode") {
+    // direct internet path is down, and stops it when direct recovers. Default
+    // ON so the "launch at login + auto" setup is fully hands-off.
+    @Published var autoMode: Bool = (UserDefaults.standard.object(forKey: "autoMode") as? Bool) ?? true {
         didSet {
             UserDefaults.standard.set(autoMode, forKey: "autoMode")
             if autoMode {
@@ -48,6 +50,10 @@ final class AgentController: ObservableObject {
         }
     }
     @Published var directOK = true // last direct-probe result (for the UI)
+
+    // Launch at login (SMAppService). Reflects/controls whether macOS starts
+    // this agent automatically after login.
+    @Published var launchAtLogin = false
 
     // Control API: random loopback port + bearer token per launch.
     private let controlPort = Int.random(in: 49_200...49_900)
@@ -82,7 +88,27 @@ final class AgentController: ObservableObject {
     }
 
     init() {
+        refreshLoginItem()
         if autoMode { startAutoProbe() }
+    }
+
+    // MARK: - Launch at login
+
+    func refreshLoginItem() {
+        launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    }
+
+    func setLaunchAtLogin(_ on: Bool) {
+        do {
+            if on {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            detail = "Launch-at-login failed: \(error.localizedDescription)"
+        }
+        refreshLoginItem()
     }
 
     var menuBarSymbol: String {
@@ -325,6 +351,11 @@ final class AgentController: ObservableObject {
             failStreak += 1; okStreak = 0
             // Direct down — bring the tunnel up after 2 consecutive failures.
             if !isRunning && failStreak >= 2 {
+                // Don't spin trying to start without a config — prompt setup once.
+                if !fm.fileExists(atPath: configURL.path) {
+                    statusLine = "Configure first — click “Edit config…”"
+                    return
+                }
                 statusLine = "Auto: direct down — starting tunnel"
                 startInternal(auto: true)
             }
