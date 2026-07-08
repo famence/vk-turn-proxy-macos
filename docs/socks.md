@@ -42,14 +42,17 @@ iOS-приложение, самый быстрый путь — импорт г
 
 ```shell
 # из iOS connection-link (vkturnproxy://…) или из Full-Backup .json:
-./vk-turn-socks-darwin-arm64 -import 'vkturnproxy://import?data=…' -config config.json
+./vk-turn-socks-darwin-arm64 -import 'vkturnproxy://import?data=…'
 ```
 
-Либо вручную из шаблона:
+Конфиг всегда лежит в одном месте —
+`~/Library/Application Support/VKTurnProxy/config.json`. Заполнить вручную:
 
 ```shell
-cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
-./vk-turn-socks-darwin-arm64 -config config.json
+mkdir -p ~/Library/Application\ Support/VKTurnProxy
+cp cmd/vk-turn-socks/config.example.json ~/Library/Application\ Support/VKTurnProxy/config.json
+# отредактируйте файл, затем просто:
+./vk-turn-socks-darwin-arm64
 ```
 
 Ключевые поля (значения — те же, что в приложении): `vk_link`, `peer_addr`

@@ -4,24 +4,44 @@
 автоматика с Surge, чтобы туннель включался сам, когда прямой интернет
 недоступен, и выключался, когда снова доступен.
 
-## Где хранить конфиг
+## Установка приложения (в пару кликов)
 
-Стандартное место (его используют и CLI, и сервис, и менюбар-агент):
+1. Скачайте из [Releases](../../releases) файл **`VK-Turn-Proxy-Agent.dmg`**
+   (он **универсальный** — работает и на Apple Silicon, и на Intel, выбирать
+   архитектуру не нужно).
+2. Откройте DMG и перетащите **«VK Turn Proxy Agent»** в **Applications**.
+3. Запустите из Applications — иконка появится в строке меню.
+4. Первый запуск (сборка не подписана Developer ID): правый клик по приложению
+   → **Open** → **Open** ещё раз. Либо один раз в терминале:
+   `xattr -dr com.apple.quarantine "/Applications/VK Turn Proxy Agent.app"`.
+5. В панели агента нажмите **«Edit config…»**, заполните сервер/ключи
+   (см. [docs/config.md](config.md)) и включите туннель.
+
+Только headless-бинарь без UI — там же в Releases: `vk-turn-socks-darwin-arm64.zip`
+(Apple Silicon) или `-amd64.zip` (Intel).
+
+> Собрать DMG самому: `scripts/package_dmg.sh` (нужны Go + Xcode CLT + xcodegen).
+> Релизы собираются автоматически на GitHub Actions при пуше тега `vX.Y.Z`
+> (см. `.github/workflows/release.yml`).
+
+## Где хранит конфиг
+
+Один-единственный файл, общий для приложения, сервиса и CLI:
 
 ```
 ~/Library/Application Support/VKTurnProxy/config.json
 ```
 
-`vk-turn-socks` без флага `-config` ищет конфиг так: сначала `./config.json`
-в текущей папке (удобно при запуске из клонированного репозитория), потом
-указанный выше путь. Класть в сам `~` не нужно — замусоривает домашнюю папку;
-используйте `Application Support`.
+`vk-turn-socks` без флага `-config` всегда использует именно его (флаг `-config`
+оставлен как override для отладки). Открыть/отредактировать его проще всего из
+трея: кнопки **«Edit config…»** (откроет в редакторе) и **«Reveal»** (покажет в
+Finder) в панели агента.
 
-Быстро создать конфиг там из настроек iOS:
+Быстро создать конфиг из настроек iOS:
 
 ```shell
 ./vk-turn-socks -import 'vkturnproxy://import?data=…'
-# без -config файл запишется в ~/Library/Application Support/VKTurnProxy/config.json
+# файл запишется в ~/Library/Application Support/VKTurnProxy/config.json
 ```
 
 ## Способ 1. Терминал (как сейчас)

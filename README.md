@@ -69,12 +69,22 @@ notarization) — в [docs/setup.md](docs/setup.md).
 локальный **SOCKS5/HTTP** прокси. Вы подключаетесь к нему из Surge.
 
 Это обычный исполняемый файл (без Xcode, без Network Extension, без аккаунта
-Apple). Готовые бинарники — в [`dist/`](dist) (Apple Silicon и Intel), инструкция
-и настройка Surge — в [docs/socks.md](docs/socks.md), а подробная настройка
-конфига (в т.ч. **где взять `private_key`**) — в [docs/config.md](docs/config.md).
+Apple).
+
+**Установка в пару кликов:** скачайте `VK-Turn-Proxy-Agent.dmg` из
+[Releases](../../releases) (универсальный — arm64 + Intel), перетащите
+«VK Turn Proxy Agent» в Applications и запустите — появится иконка в трее
+со статистикой и тумблерами. Первый запуск (без подписи): правый клик →
+Open. Подробно — [docs/automation.md](docs/automation.md#установка-приложения-в-пару-кликов).
+
+Только CLI без UI — тоже в Releases (`vk-turn-socks-darwin-arm64.zip` /
+`-amd64.zip`) или соберите `make socks`. Настройка Surge — в
+[docs/socks.md](docs/socks.md), настройка конфига (в т.ч. **где взять
+`private_key`**) — в [docs/config.md](docs/config.md).
 
 Если уже настроено iOS-приложение — перенос в одну команду:
-`./vk-turn-socks -import 'vkturnproxy://import?data=…' -config config.json`.
+`./vk-turn-socks -import 'vkturnproxy://import?data=…'`
+(конфиг ляжет в `~/Library/Application Support/VKTurnProxy/config.json`).
 
 ```shell
 cp cmd/vk-turn-socks/config.example.json config.json   # заполнить своими данными
