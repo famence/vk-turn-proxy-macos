@@ -1,6 +1,6 @@
 // Command vk-turn-socks runs the VK TURN proxy engine WITHOUT any macOS
-// Network Extension, exposing the tunnel as a local SOCKS5 (and optional HTTP)
-// proxy you point Surge / any app at.
+// Network Extension, exposing the tunnel as a local SOCKS5 (TCP + UDP) and
+// optional HTTP proxy you point Surge / any app at.
 //
 // It reuses the exact same engine as the iOS/macOS apps — pkg/proxy (VK
 // credentials, TURN allocations, DTLS/SRTP/WRAP/WRAP-A transports, cred pool,
@@ -8,23 +8,25 @@
 // through the TURN relay). The only difference is what terminates WireGuard:
 // instead of a system TUN interface (which needs a Packet Tunnel Provider),
 // this uses wireguard-go's userspace gVisor netstack. Traffic that enters the
-// SOCKS5/HTTP listener is dialed from *inside* the tunnel, so DNS and TCP both
-// egress through your VPS — exactly what you want behind Surge.
+// SOCKS5/HTTP listener is dialed from *inside* the tunnel, so DNS and TCP/UDP
+// all egress through your VPS — exactly what you want behind Surge.
 //
-// Because there's no system extension and no cgo, it's a plain executable:
-// build it with `go build`, run it, and set Surge's proxy to 127.0.0.1:1080.
+// Direct-egress guarantee (see docs/socks.md): the engine's OWN sockets — to
+// the VK API and to the VK TURN relay carrying the WireGuard transport — use
+// plain net.Dial on the OS default route. They never traverse this proxy or
+// the tunnel. Additionally the tunnel dialer refuses loopback / self targets
+// (dial.go), so app traffic can never fold back on itself.
 //
-// Limitations vs the full app:
-//   - TCP only (SOCKS5 CONNECT + HTTP). No SOCKS5 UDP ASSOCIATE yet — for
-//     most browsing that's fine; let Surge handle UDP/QUIC outside this proxy
-//     or disable QUIC.
-//   - No captcha WebView. The engine auto-solves VK captcha (PoW + slider) in
-//     the common case; if VK forces an unsolvable captcha, bootstrap will fail
-//     and you retry (or use a logged-in cookie via -cookie).
+// A local control API (‑control) lets a front-end (the menu-bar agent) read
+// status, learn the current TURN relay IP, and hand back a manually-solved
+// captcha token.
+//
+// Limitations vs the full app: no captcha WebView in the CLI itself (the
+// engine auto-solves in the common case; for manual solving use the menu-bar
+// agent, the control API /solve endpoint, or a logged-in cookie).
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -32,14 +34,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -70,6 +69,10 @@ type CLIConfig struct {
 	WireGuard               WGConfig `json:"wireguard"`
 	SocksListen             string   `json:"socks_listen,omitempty"`
 	HTTPListen              string   `json:"http_listen,omitempty"`
+	// ControlListen enables the local control API (status / solve captcha /
+	// stop) used by the menu-bar agent. 127.0.0.1 only.
+	ControlListen string `json:"control_listen,omitempty"`
+	ControlToken  string `json:"control_token,omitempty"`
 	// Cookie (VKAuth) mode: a logged-in VK "Cookie:" header ("remixsid=…; p=…").
 	// When set, the engine uses ONLY the cookie cred path (no anonymous fallback),
 	// which keeps working when VK disables anonymous call-join.
@@ -90,6 +93,9 @@ func main() {
 	cfgPath := flag.String("config", "config.json", "path to JSON config file")
 	socksFlag := flag.String("socks", "", "SOCKS5 listen address (overrides config; e.g. 127.0.0.1:1080)")
 	httpFlag := flag.String("http", "", "HTTP proxy listen address (overrides config; empty disables)")
+	controlFlag := flag.String("control", "", "control API listen address (overrides config; e.g. 127.0.0.1:1099)")
+	controlTokenFlag := flag.String("control-token", "", "control API bearer token (overrides config)")
+	captchaStdin := flag.Bool("captcha-stdin", false, "prompt on stdin to paste a captcha success_token when one is required")
 	verbose := flag.Bool("v", false, "verbose WireGuard logging")
 	flag.Parse()
 
@@ -103,6 +109,12 @@ func main() {
 	if *httpFlag != "" {
 		cfg.HTTPListen = *httpFlag
 	}
+	if *controlFlag != "" {
+		cfg.ControlListen = *controlFlag
+	}
+	if *controlTokenFlag != "" {
+		cfg.ControlToken = *controlTokenFlag
+	}
 	if cfg.SocksListen == "" {
 		cfg.SocksListen = "127.0.0.1:1080"
 	}
@@ -115,7 +127,7 @@ func main() {
 		logLevel = device.LogLevelVerbose
 	}
 
-	if err := run(cfg, logLevel); err != nil {
+	if err := run(cfg, logLevel, *captchaStdin); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
 }
@@ -138,7 +150,7 @@ func loadConfig(path string) (*CLIConfig, error) {
 	return &c, nil
 }
 
-func run(cfg *CLIConfig, logLevel int) error {
+func run(cfg *CLIConfig, logLevel int, captchaStdin bool) error {
 	// Map the string mode to the engine's transport flags (same precedence as
 	// the app: wrap-a > srtp > srtp-wrap > legacy).
 	useSrtp, useWrap, useWrapA := false, false, false
@@ -174,9 +186,7 @@ func run(cfg *CLIConfig, logLevel int) error {
 		log.Printf("VKAuth: using logged-in cookie path (no anonymous fallback)")
 	}
 
-	// Best-effort pre-resolution of VK API hosts, mirroring the app. On a
-	// normal Mac the engine's own resolver works, but seeding IPs is cheap
-	// insurance on restrictive networks.
+	// Best-effort pre-resolution of VK API hosts, mirroring the app.
 	if ips := resolveVKHosts(); len(ips) > 0 {
 		proxy.SetVKHostIPs(ips)
 	}
@@ -196,18 +206,32 @@ func run(cfg *CLIConfig, logLevel int) error {
 		DeviceID:         cfg.DeviceID,
 		NumConns:         cfg.NumConns,
 		CredPoolCooldown: time.Duration(cfg.CredPoolCooldownSeconds) * time.Second,
+		// CaptchaSolver left nil → engine uses waitForCaptchaAnswer, which
+		// surfaces the URL via GetStats().CaptchaImageURL and blocks until
+		// p.SolveCaptcha() is called (by the control API or the stdin prompt).
 	})
 
 	// Resolve the WireGuard interface address + DNS + UAPI config. In WRAP-A
 	// mode these come from the server (GETCONF) after bootstrap; otherwise from
 	// the config file.
-	var wgAddrs []netip.Addr
-	var dnsAddrs []netip.Addr
+	var wgAddrs, dnsAddrs []netip.Addr
 	var uapi string
 	mtu := 1280
 
+	// Start the local control API + optional stdin captcha prompt EARLY so a
+	// captcha encountered during bootstrap can be solved (bootstrap blocks in
+	// WaitBootstrap below). Both just observe p's stats and call p.SolveCaptcha.
+	if cfg.ControlListen != "" {
+		if err := startControlAPI(cfg.ControlListen, cfg.ControlToken, p); err != nil {
+			return fmt.Errorf("control API: %w", err)
+		}
+		log.Printf("control API listening on %s", cfg.ControlListen)
+	}
+	if captchaStdin {
+		go watchCaptchaStdin(p)
+	}
+
 	if useWrapA {
-		// Bootstrap first (no device yet) so the server can mint our config.
 		log.Printf("bootstrapping (WRAP-A GETCONF)…")
 		go func() {
 			if err := p.Start(); err != nil {
@@ -252,9 +276,8 @@ func run(cfg *CLIConfig, logLevel int) error {
 		dnsAddrs = []netip.Addr{netip.MustParseAddr("1.1.1.1")}
 	}
 
-	// Userspace WireGuard: gVisor netstack TUN → we get a Net that dials from
-	// inside the tunnel. This replaces the system TUN a Packet Tunnel Provider
-	// would otherwise supply.
+	// Userspace WireGuard: gVisor netstack TUN → a Net that dials from inside
+	// the tunnel. Replaces the system TUN a Packet Tunnel Provider would supply.
 	tunDev, tnet, err := netstack.CreateNetTUN(wgAddrs, dnsAddrs, mtu)
 	if err != nil {
 		return fmt.Errorf("netstack CreateNetTUN: %w", err)
@@ -269,31 +292,32 @@ func run(cfg *CLIConfig, logLevel int) error {
 		return fmt.Errorf("wireguard Up: %w", err)
 	}
 
-	// Wait for the first live TURN+DTLS session before accepting proxy clients,
-	// so Surge doesn't see connection failures during the ~1-15s bootstrap.
 	log.Printf("waiting for tunnel to come up…")
 	if err := p.WaitBootstrap(120 * time.Second); err != nil {
 		dev.Close()
-		return fmt.Errorf("bootstrap: %w (VK captcha may be blocking; retry, or set cookie_header)", err)
+		return fmt.Errorf("bootstrap: %w (VK captcha may be blocking; use the menu-bar agent, /solve, -captcha-stdin, or set cookie_header)", err)
 	}
 	if ip := p.TURNServerIP(); ip != "" {
-		log.Printf("tunnel up via TURN relay %s", ip)
+		// Print the relay IP prominently: to keep egress DIRECT even if you run
+		// Surge in enhanced (system-wide TUN) mode, add a rule sending this IP
+		// DIRECT — see docs/socks.md #4.
+		log.Printf("tunnel up via TURN relay %s — keep it DIRECT in Surge (IP-CIDR,%s/32,DIRECT)", ip, ip)
 	} else {
 		log.Printf("tunnel up")
 	}
 
-	dialer := &tunnelDialer{net: tnet}
+	// Anti-loop: the tunnel dialer must never dial our own listeners or
+	// loopback. Register every local listener as forbidden.
+	dialer := newTunnelDialer(tnet, []string{cfg.SocksListen, cfg.HTTPListen, cfg.ControlListen})
 
-	// SOCKS5 listener (primary — this is what you point Surge at).
 	socksLn, err := net.Listen("tcp", cfg.SocksListen)
 	if err != nil {
 		dev.Close()
 		return fmt.Errorf("listen socks %s: %w", cfg.SocksListen, err)
 	}
 	go serveSocks5(socksLn, dialer)
-	log.Printf("SOCKS5 proxy listening on %s", cfg.SocksListen)
+	log.Printf("SOCKS5 proxy (TCP + UDP) listening on %s", cfg.SocksListen)
 
-	// Optional HTTP proxy (CONNECT + plain forwarding).
 	if cfg.HTTPListen != "" {
 		httpLn, err := net.Listen("tcp", cfg.HTTPListen)
 		if err != nil {
@@ -304,7 +328,6 @@ func run(cfg *CLIConfig, logLevel int) error {
 		log.Printf("HTTP proxy listening on %s", cfg.HTTPListen)
 	}
 
-	// Periodic one-line stats so you can see it's alive and moving bytes.
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(30 * time.Second)
@@ -323,264 +346,18 @@ func run(cfg *CLIConfig, logLevel int) error {
 		}
 	}()
 
-	// Block until Ctrl-C / SIGTERM, then tear down cleanly.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
+	select {
+	case <-sig:
+	case <-controlStopCh: // POST /stop from the menu-bar agent
+	}
 	log.Printf("shutting down…")
 	close(stop)
 	_ = socksLn.Close()
 	p.StopWithTimeout(2 * time.Second)
 	dev.Close()
 	return nil
-}
-
-// tunnelDialer dials TCP from inside the WireGuard tunnel via netstack.
-type tunnelDialer struct{ net *netstack.Net }
-
-func (t *tunnelDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-	default:
-		return nil, fmt.Errorf("tunnel dial: unsupported network %q", network)
-	}
-	host, portStr, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, fmt.Errorf("bad port %q", portStr)
-	}
-
-	var ips []netip.Addr
-	if a, err := netip.ParseAddr(host); err == nil {
-		ips = []netip.Addr{a}
-	} else {
-		// Resolve through the tunnel's DNS (no DNS leak).
-		hosts, err := t.net.LookupHost(host)
-		if err != nil {
-			return nil, fmt.Errorf("tunnel resolve %s: %w", host, err)
-		}
-		for _, h := range hosts {
-			if a, e := netip.ParseAddr(h); e == nil {
-				ips = append(ips, a)
-			}
-		}
-		if len(ips) == 0 {
-			return nil, fmt.Errorf("tunnel resolve %s: no addresses", host)
-		}
-	}
-
-	var lastErr error
-	for _, ip := range ips {
-		c, err := t.net.DialContextTCPAddrPort(ctx, netip.AddrPortFrom(ip, uint16(port)))
-		if err == nil {
-			return c, nil
-		}
-		lastErr = err
-	}
-	return nil, fmt.Errorf("tunnel dial %s: %w", address, lastErr)
-}
-
-// ---------------- SOCKS5 (RFC 1928, CONNECT only, no auth) ----------------
-
-func serveSocks5(ln net.Listener, dialer *tunnelDialer) {
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			continue
-		}
-		go handleSocks5(c, dialer)
-	}
-}
-
-func handleSocks5(client net.Conn, dialer *tunnelDialer) {
-	defer client.Close()
-	br := bufio.NewReader(client)
-
-	// Greeting: VER NMETHODS METHODS...
-	ver, err := br.ReadByte()
-	if err != nil || ver != 0x05 {
-		return
-	}
-	nMethods, err := br.ReadByte()
-	if err != nil {
-		return
-	}
-	if _, err := io.CopyN(io.Discard, br, int64(nMethods)); err != nil {
-		return
-	}
-	// Reply: no authentication required.
-	if _, err := client.Write([]byte{0x05, 0x00}); err != nil {
-		return
-	}
-
-	// Request: VER CMD RSV ATYP DST.ADDR DST.PORT
-	hdr := make([]byte, 4)
-	if _, err := io.ReadFull(br, hdr); err != nil {
-		return
-	}
-	if hdr[0] != 0x05 {
-		return
-	}
-	cmd, atyp := hdr[1], hdr[3]
-	if cmd != 0x01 { // only CONNECT
-		socksReply(client, 0x07) // command not supported
-		return
-	}
-
-	var host string
-	switch atyp {
-	case 0x01: // IPv4
-		b := make([]byte, 4)
-		if _, err := io.ReadFull(br, b); err != nil {
-			return
-		}
-		host = net.IP(b).String()
-	case 0x04: // IPv6
-		b := make([]byte, 16)
-		if _, err := io.ReadFull(br, b); err != nil {
-			return
-		}
-		host = net.IP(b).String()
-	case 0x03: // domain
-		l, err := br.ReadByte()
-		if err != nil {
-			return
-		}
-		b := make([]byte, int(l))
-		if _, err := io.ReadFull(br, b); err != nil {
-			return
-		}
-		host = string(b)
-	default:
-		socksReply(client, 0x08) // address type not supported
-		return
-	}
-	pb := make([]byte, 2)
-	if _, err := io.ReadFull(br, pb); err != nil {
-		return
-	}
-	port := int(pb[0])<<8 | int(pb[1])
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	upstream, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
-	cancel()
-	if err != nil {
-		socksReply(client, 0x05) // connection refused
-		return
-	}
-	defer upstream.Close()
-
-	// Success reply (bound addr 0.0.0.0:0 — clients ignore it for CONNECT).
-	if _, err := client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
-		return
-	}
-
-	pipe(client, upstream, br)
-}
-
-func socksReply(c net.Conn, code byte) {
-	_, _ = c.Write([]byte{0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-}
-
-// ---------------- HTTP proxy (CONNECT tunneling + plain forwarding) --------
-
-func serveHTTPProxy(ln net.Listener, dialer *tunnelDialer) {
-	transport := &http.Transport{
-		DialContext:           dialer.DialContext,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		ExpectContinueTimeout: time.Second,
-	}
-	srv := &http.Server{
-		Handler: &httpProxyHandler{dialer: dialer, transport: transport},
-	}
-	_ = srv.Serve(ln)
-}
-
-type httpProxyHandler struct {
-	dialer    *tunnelDialer
-	transport *http.Transport
-}
-
-func (h *httpProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodConnect {
-		h.handleConnect(w, r)
-		return
-	}
-	// Plain forward proxy: strip hop-by-hop headers, re-issue via the tunnel.
-	r.RequestURI = ""
-	removeHopByHop(r.Header)
-	resp, err := h.transport.RoundTrip(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	removeHopByHop(resp.Header)
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
-}
-
-func (h *httpProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	upstream, err := h.dialer.DialContext(ctx, "tcp", r.Host)
-	cancel()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		upstream.Close()
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	client, _, err := hj.Hijack()
-	if err != nil {
-		upstream.Close()
-		return
-	}
-	_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	pipe(client, upstream, nil)
-}
-
-var hopByHop = []string{
-	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
-	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-}
-
-func removeHopByHop(h http.Header) {
-	for _, k := range hopByHop {
-		h.Del(k)
-	}
-}
-
-// ---------------- helpers ----------------
-
-// pipe copies bidirectionally between client and upstream and closes when
-// either side ends. `clientReader`, if non-nil, is a buffered reader wrapping
-// the client conn (SOCKS path) so any bytes already buffered aren't lost.
-func pipe(client, upstream net.Conn, clientReader io.Reader) {
-	if clientReader == nil {
-		clientReader = client
-	}
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upstream, clientReader); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(client, upstream); done <- struct{}{} }()
-	<-done
-	_ = client.Close()
-	_ = upstream.Close()
 }
 
 // buildUAPI renders the WireGuard UAPI config from base64 keys (converted to
@@ -608,11 +385,11 @@ func buildUAPI(wg WGConfig, peerAddr string) (string, error) {
 	b.WriteString("allowed_ip=0.0.0.0/0\n")
 	b.WriteString("allowed_ip=::/0\n")
 	if psk := strings.TrimSpace(wg.PresharedKey); psk != "" {
-		p, err := wgKeyHex(psk)
+		pk, err := wgKeyHex(psk)
 		if err != nil {
 			return "", fmt.Errorf("preshared_key: %w", err)
 		}
-		fmt.Fprintf(&b, "preshared_key=%s\n", p)
+		fmt.Fprintf(&b, "preshared_key=%s\n", pk)
 	}
 	return b.String(), nil
 }
@@ -701,6 +478,6 @@ func humanBytes(n int64) string {
 	case f >= 1<<10:
 		return fmt.Sprintf("%.1fKB", f/(1<<10))
 	default:
-		return strconv.FormatInt(n, 10) + "B"
+		return fmt.Sprintf("%dB", n)
 	}
 }
