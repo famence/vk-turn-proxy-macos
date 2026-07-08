@@ -97,14 +97,29 @@ struct DashboardView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Button("Edit config…") { controller.openConfig() }
-                .buttonStyle(.link)
-            Spacer()
-            Button("Quit") { controller.quit() }
-                .buttonStyle(.link)
+        VStack(alignment: .leading, spacing: 6) {
+            // Direct access to the single config file (app-support). "Edit"
+            // opens it in the default editor; "Reveal" shows it in Finder.
+            HStack(spacing: 12) {
+                Button { controller.openConfig() } label: {
+                    Label("Edit config…", systemImage: "square.and.pencil")
+                }
+                Button { controller.revealConfig() } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+                Spacer()
+                Button("Quit") { controller.quit() }
+            }
+            .font(.caption)
+            .buttonStyle(.link)
+
+            Text("Config: ~/Library/Application Support/VKTurnProxy/config.json")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-        .font(.caption)
     }
 
     // MARK: - Bits
