@@ -16,7 +16,7 @@
 # Or in one shot:
 #   make all
 
-.PHONY: all bridge project app clean
+.PHONY: all bridge project app socks menubar clean
 
 all: bridge project
 
@@ -36,6 +36,18 @@ app:
 		-scheme VKTurnProxy -configuration Release \
 		-derivedDataPath build build
 
+# Build the standalone SOCKS5/HTTP proxy binary for the host arch (pure Go, no
+# Xcode needed). Cross-compile with GOOS/GOARCH for other targets.
+socks:
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o vk-turn-socks ./cmd/vk-turn-socks
+	@echo "==> Built ./vk-turn-socks"
+
+# Build the menu-bar agent .app (macOS only; see scripts/build_menubar.sh).
+menubar:
+	scripts/build_menubar.sh
+
 clean:
 	$(MAKE) -C WireGuardBridge clean
 	rm -rf VKTurnProxy/build VKTurnProxy/VKTurnProxy.xcodeproj
+	rm -rf VKTurnMenuBar/VKTurnMenuBar.xcodeproj VKTurnMenuBar/VKTurnMenuBar/Resources/vk-turn-socks
+	rm -f vk-turn-socks

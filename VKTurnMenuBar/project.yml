@@ -1,0 +1,40 @@
+name: VKTurnMenuBar
+options:
+  bundleIdPrefix: com.vkturnproxy.mac.agent
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.2"
+
+settings:
+  base:
+    # Replace with your own Team ID (or leave blank + set CODE_SIGN_IDENTITY to
+    # "-" for an ad-hoc local build). No Apple Developer account is required to
+    # run this locally — it's an ordinary utility app (no Network Extension).
+    DEVELOPMENT_TEAM: CDMQ33VFQC
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+
+targets:
+  VKTurnMenuBar:
+    type: application
+    platform: macOS
+    sources:
+      - path: VKTurnMenuBar
+    info:
+      path: VKTurnMenuBar/Info.plist
+      properties:
+        CFBundleDisplayName: "VK Turn Proxy Agent"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        LSUIElement: true
+        ITSAppUsesNonExemptEncryption: false
+        NSPrincipalClass: NSApplication
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vkturnproxy.mac.agent
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: 1
+        # NOT sandboxed: the agent launches the bundled vk-turn-socks binary as
+        # a subprocess, which the App Sandbox would block. Distribute via
+        # Developer ID (or run ad-hoc locally). No entitlements file needed.
