@@ -51,13 +51,16 @@ cp cmd/vk-turn-socks/config.example.json "$RES_DIR/config.example.json"
 echo "==> [3/4] Generating Xcode project…"
 ( cd VKTurnMenuBar && xcodegen generate )
 
-echo "==> [4/4] Building the app…"
+echo "==> [4/4] Building the app (universal arm64 + x86_64)…"
 DERIVED="$REPO_ROOT/build/DerivedData"
 XCARGS=(
   -project VKTurnMenuBar/VKTurnMenuBar.xcodeproj
   -scheme VKTurnMenuBar
   -configuration Release
   -derivedDataPath "$DERIVED"
+  # Universal app so ONE download runs on both Apple Silicon and Intel.
+  ARCHS="arm64 x86_64"
+  ONLY_ACTIVE_ARCH=NO
 )
 if [[ -n "${TEAM_ID:-}" ]]; then
   XCARGS+=( DEVELOPMENT_TEAM="$TEAM_ID" -allowProvisioningUpdates )
