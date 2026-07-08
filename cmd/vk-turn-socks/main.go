@@ -125,6 +125,13 @@ func main() {
 	resolvedCfg := resolveConfigPath(*cfgPath)
 	cfg, err := loadConfig(resolvedCfg)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			log.Fatalf("config not found at %s\n\nCreate it (pick one):\n"+
+				"  • import your iOS settings:  vk-turn-socks -import 'vkturnproxy://import?data=…'\n"+
+				"  • or copy the template:      cp cmd/vk-turn-socks/config.example.json '%s'\n"+
+				"  • or use the menu-bar agent's \"Edit config…\" button.\n"+
+				"See docs/config.md.", resolvedCfg, resolvedCfg)
+		}
 		log.Fatalf("config: %v", err)
 	}
 	log.Printf("using config: %s", resolvedCfg)
@@ -171,23 +178,19 @@ func appSupportConfigPath() string {
 	return filepath.Join(home, "Library", "Application Support", "VKTurnProxy", "config.json")
 }
 
-// resolveConfigPath picks the config file to load. An explicit -config wins.
-// Otherwise prefer ./config.json (handy when running from a checkout), then
-// fall back to the standard app-support path so a service/agent install and a
-// bare `vk-turn-socks` in the terminal use the very same file.
+// resolveConfigPath picks the config file to load. There is ONE canonical
+// location — ~/Library/Application Support/VKTurnProxy/config.json — shared by
+// the terminal CLI, the launchd service, and the menu-bar agent. An explicit
+// -config still overrides it (for devs / testing), but by default the config
+// always lives in that single app-support path.
 func resolveConfigPath(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if _, err := os.Stat("config.json"); err == nil {
-		return "config.json"
-	}
 	if p := appSupportConfigPath(); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
+		return p
 	}
-	return "config.json" // yields a clear "not found" error below
+	return "config.json" // only if $HOME is somehow unknown
 }
 
 func loadConfig(path string) (*CLIConfig, error) {
