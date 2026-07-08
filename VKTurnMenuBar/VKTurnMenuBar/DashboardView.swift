@@ -7,7 +7,7 @@ struct DashboardView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
             if controller.captchaPending {
@@ -32,17 +32,17 @@ struct DashboardView: View {
             Divider()
             footer
         }
-        .padding(14)
-        .frame(width: 300)
+        .padding(16)
+        .frame(width: 320)
     }
 
     // MARK: - Sections
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Circle()
                 .fill(statusColor)
-                .frame(width: 10, height: 10)
+                .frame(width: 11, height: 11)
             VStack(alignment: .leading, spacing: 1) {
                 Text("VK Turn Proxy").font(.headline)
                 Text(controller.statusLine)
@@ -57,14 +57,9 @@ struct DashboardView: View {
     @ViewBuilder
     private var controls: some View {
         // Auto mode owns the lifecycle when enabled; otherwise a manual toggle.
-        Toggle(isOn: $controller.autoMode) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Auto (failover)")
-                Text("Run only when direct internet is down")
-                    .font(.caption2).foregroundColor(.secondary)
-            }
-        }
-        .toggleStyle(.switch)
+        switchRow(title: "Auto (failover)",
+                  subtitle: "Run only when direct internet is down",
+                  isOn: $controller.autoMode)
 
         if !controller.autoMode {
             Button {
@@ -76,15 +71,13 @@ struct DashboardView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(controller.isRunning ? .red : .accentColor)
+            .controlSize(.large)
         }
 
-        Toggle(isOn: Binding(
-            get: { controller.launchAtLogin },
-            set: { controller.setLaunchAtLogin($0) }
-        )) {
-            Text("Launch at login")
-        }
-        .toggleStyle(.switch)
+        switchRow(title: "Launch at login",
+                  subtitle: nil,
+                  isOn: Binding(get: { controller.launchAtLogin },
+                                set: { controller.setLaunchAtLogin($0) }))
     }
 
     private var stats: some View {
@@ -105,32 +98,40 @@ struct DashboardView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Direct access to the single config file (app-support). "Edit"
-            // opens it in the default editor; "Reveal" shows it in Finder.
-            HStack(spacing: 12) {
-                Button { controller.openConfig() } label: {
-                    Label("Edit config…", systemImage: "square.and.pencil")
-                }
-                Button { controller.revealConfig() } label: {
-                    Label("Reveal", systemImage: "folder")
-                }
-                Spacer()
-                Button("Quit") { controller.quit() }
+        HStack(spacing: 16) {
+            Button { controller.openConfig() } label: {
+                Label("Edit config", systemImage: "square.and.pencil")
             }
-            .font(.caption)
-            .buttonStyle(.link)
-
-            Text("Config: ~/Library/Application Support/VKTurnProxy/config.json")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Button {
+                openWindow(id: "logs")
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Logs", systemImage: "doc.text.magnifyingglass")
+            }
+            Spacer()
+            Button("Quit") { controller.quit() }
         }
+        .font(.caption)
+        .buttonStyle(.link)
     }
 
-    // MARK: - Bits
+    // MARK: - Reusable bits
+
+    /// A label on the left and a switch pinned to the right.
+    private func switchRow(title: String, subtitle: String?, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                if let subtitle {
+                    Text(subtitle).font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            Spacer(minLength: 12)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+    }
 
     private func stat(_ title: String, _ value: String, sub: String?) -> some View {
         VStack(spacing: 2) {

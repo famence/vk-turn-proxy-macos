@@ -39,3 +39,4 @@ notarize.env
 # local scripts
 release.sh
 install.sh
+/vk-turn-socks

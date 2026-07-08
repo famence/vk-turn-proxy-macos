@@ -32,5 +32,11 @@ struct VKTurnMenuBarApp: App {
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 480, height: 720)
+
+        // Live engine log.
+        Window("VK Turn Proxy — Logs", id: "logs") {
+            LogsWindow(controller: controller)
+        }
+        .defaultSize(width: 720, height: 460)
     }
 }

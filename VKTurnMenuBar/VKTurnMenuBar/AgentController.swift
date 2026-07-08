@@ -62,7 +62,10 @@ final class AgentController: ObservableObject {
 
     private var process: Process?
     private var startedByAuto = false
+    private var userStopped = false
+    private var procStartedAt = Date()
     private var pollTimer: Timer?
+    private var logHandle: FileHandle?
 
     // Speed derivation.
     private var prevTx: Int64 = 0
@@ -80,12 +83,14 @@ final class AgentController: ObservableObject {
 
     private let fm = FileManager.default
 
-    var configURL: URL {
+    private var supportDir: URL {
         let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("VKTurnProxy", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("config.json")
+        return dir
     }
+    var configURL: URL { supportDir.appendingPathComponent("config.json") }
+    var logURL: URL { supportDir.appendingPathComponent("agent.log") }
 
     init() {
         refreshLoginItem()
@@ -138,6 +143,15 @@ final class AgentController: ObservableObject {
             return
         }
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        // Best-effort: strip the quarantine flag from the bundled engine so
+        // Gatekeeper doesn't SIGKILL it on launch when the app is unsigned.
+        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/xattr"),
+                             arguments: ["-d", "com.apple.quarantine", binary.path])
+
+        // Fresh log file per launch, captured for the Logs window.
+        fm.createFile(atPath: logURL.path, contents: nil)
+        logHandle = try? FileHandle(forWritingTo: logURL)
+        appendLog("=== \(auto ? "auto-" : "")start \(Self.timestamp()) ===")
 
         let proc = Process()
         proc.executableURL = binary
@@ -146,19 +160,30 @@ final class AgentController: ObservableObject {
             "-control", "127.0.0.1:\(controlPort)",
             "-control-token", controlToken,
         ]
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        proc.terminationHandler = { [weak self] _ in
-            Task { @MainActor in self?.onProcessExit() }
+        // Capture the engine's stdout+stderr into the log file so the Logs
+        // window (and any failure) is visible.
+        if let h = logHandle {
+            proc.standardOutput = h
+            proc.standardError = h
+        } else {
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+        }
+        proc.terminationHandler = { [weak self] p in
+            Task { @MainActor in self?.onProcessExit(code: p.terminationStatus) }
         }
         do {
             try proc.run()
         } catch {
-            detail = "Failed to launch: \(error.localizedDescription)"
+            appendLog("launch failed: \(error.localizedDescription)")
+            statusLine = "Failed to launch — see Logs"
+            detail = error.localizedDescription
             return
         }
         process = proc
         startedByAuto = auto
+        userStopped = false
+        procStartedAt = Date()
         isRunning = true
         statusLine = "Connecting…"
         detail = ""
@@ -169,6 +194,8 @@ final class AgentController: ObservableObject {
     func stop() { stopInternal() }
 
     private func stopInternal() {
+        userStopped = true
+        appendLog("=== stop requested \(Self.timestamp()) ===")
         postControl("/stop")
         pollTimer?.invalidate()
         pollTimer = nil
@@ -183,7 +210,13 @@ final class AgentController: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
 
-    private func onProcessExit() {
+    private func onProcessExit(code: Int32 = 0) {
+        let ranFor = Date().timeIntervalSince(procStartedAt)
+        let crashedFast = !userStopped && ranFor < 5
+        appendLog("=== engine exited (code \(code), after \(Int(ranFor))s) ===")
+        try? logHandle?.close()
+        logHandle = nil
+
         process = nil
         startedByAuto = false
         isRunning = false
@@ -194,9 +227,54 @@ final class AgentController: ObservableObject {
         poolFilled = 0; poolWithCreds = 0; poolSize = 0
         txBytes = 0; rxBytes = 0; txRate = 0; rxRate = 0
         uptimeSec = 0
-        statusLine = autoMode ? "Auto: idle (direct OK)" : "Stopped"
         pollTimer?.invalidate()
         pollTimer = nil
+
+        if crashedFast {
+            // Exited almost immediately and not by user request — a config /
+            // handshake problem. Point at the Logs so it's not a silent no-op.
+            statusLine = "Couldn’t connect — open Logs"
+            detail = "The engine exited right away. Check Logs and your config."
+        } else {
+            statusLine = autoMode ? "Auto: idle (direct OK)" : "Stopped"
+            detail = ""
+        }
+    }
+
+    // MARK: - Logs
+
+    /// Current session log contents (for the Logs window).
+    func readLog() -> String {
+        (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+    }
+
+    func clearLog() {
+        try? "".write(to: logURL, atomically: true, encoding: .utf8)
+    }
+
+    func revealLog() {
+        if !fm.fileExists(atPath: logURL.path) { fm.createFile(atPath: logURL.path, contents: nil) }
+        NSWorkspace.shared.activateFileViewerSelecting([logURL])
+    }
+
+    private func appendLog(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        if let h = logHandle {
+            try? h.seekToEnd()
+            try? h.write(contentsOf: data)
+        } else {
+            // No open handle (agent-side event before/after a run) — append directly.
+            if !fm.fileExists(atPath: logURL.path) { fm.createFile(atPath: logURL.path, contents: nil) }
+            if let h = try? FileHandle(forWritingTo: logURL) {
+                try? h.seekToEnd(); try? h.write(contentsOf: data); try? h.close()
+            }
+        }
+    }
+
+    private static func timestamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f.string(from: Date())
     }
 
     // MARK: - Config helpers
