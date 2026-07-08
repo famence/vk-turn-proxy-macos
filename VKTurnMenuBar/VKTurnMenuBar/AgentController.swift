@@ -66,6 +66,8 @@ final class AgentController: ObservableObject {
     private var procStartedAt = Date()
     private var pollTimer: Timer?
     private var logHandle: FileHandle?
+    private var connectedAnnounced = false   // "Connected" notification fired
+    private var autoStopReason = false        // auto is stopping because direct recovered
 
     // Speed derivation.
     private var prevTx: Int64 = 0
@@ -93,6 +95,7 @@ final class AgentController: ObservableObject {
     var logURL: URL { supportDir.appendingPathComponent("agent.log") }
 
     init() {
+        Notifier.requestAuth()
         refreshLoginItem()
         if autoMode { startAutoProbe() }
     }
@@ -230,6 +233,15 @@ final class AgentController: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = nil
 
+        let wasConnected = connectedAnnounced
+        connectedAnnounced = false
+
+        // Notify on a successful auto-disconnect (direct recovered).
+        if autoStopReason {
+            autoStopReason = false
+            if wasConnected { Notifier.post("VK Turn Proxy", "Отключено (прямой доступ восстановлен)") }
+        }
+
         if crashedFast {
             // Exited almost immediately and not by user request — a config /
             // handshake problem. Point at the Logs so it's not a silent no-op.
@@ -297,7 +309,7 @@ final class AgentController: ObservableObject {
 
     private func startPolling() {
         pollTimer?.invalidate()
-        let t = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -341,6 +353,11 @@ final class AgentController: ObservableObject {
         } else if s.active_conns > 0 {
             statusLine = "Connected"
             detail = ""
+            // Real connection established (auto or manual) — notify once.
+            if !connectedAnnounced {
+                connectedAnnounced = true
+                Notifier.post("VK Turn Proxy", "Подключено")
+            }
         } else {
             statusLine = "Connecting…"
         }
@@ -420,6 +437,8 @@ final class AgentController: ObservableObject {
             // Direct recovered — stop the auto-started tunnel after a couple of
             // confirmations (hysteresis) so a single blip doesn't flap it.
             if isRunning && startedByAuto && okStreak >= 3 {
+                Notifier.post("Авто-режим", "Прямой доступ восстановлен — отключаю прокси")
+                autoStopReason = true
                 statusLine = "Auto: direct recovered — stopping tunnel"
                 stopInternal()
             } else if !isRunning {
@@ -434,6 +453,7 @@ final class AgentController: ObservableObject {
                     statusLine = "Configure first — click “Edit config…”"
                     return
                 }
+                Notifier.post("Авто-режим", "Прямой доступ пропал — подключаю прокси")
                 statusLine = "Auto: direct down — starting tunnel"
                 startInternal(auto: true)
             }

@@ -141,9 +141,15 @@ struct DashboardView: View {
             if let sub { Text(sub).font(.caption2).foregroundColor(.secondary) }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .underPageBackgroundColor))
-        .cornerRadius(8)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.primary.opacity(0.04))               // light, unobtrusive
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)  // thin hairline
+        )
     }
 
     private var statusColor: Color {
