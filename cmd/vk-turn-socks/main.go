@@ -243,15 +243,23 @@ func run(cfg *CLIConfig, logLevel int, captchaStdin bool) error {
 		go watchCaptchaStdin(p)
 	}
 
+	// Kick off the engine bootstrap (VK creds + TURN alloc + DTLS/SRTP) in the
+	// background. Doing this explicitly — rather than letting dev.Up()'s
+	// bind.Open trigger p.Start() synchronously — is important: p.Start()
+	// blocks until the first conn is live, so if it's stuck retrying a failing
+	// handshake, a synchronous trigger would hang dev.Up() and the SOCKS
+	// listener would never start. Start() is idempotent, so dev.Up()'s later
+	// call is a no-op.
+	go func() {
+		if err := p.Start(); err != nil {
+			log.Printf("proxy.Start: %v", err)
+		}
+	}()
+
 	if useWrapA {
 		log.Printf("bootstrapping (WRAP-A GETCONF)…")
-		go func() {
-			if err := p.Start(); err != nil {
-				log.Printf("proxy.Start: %v", err)
-			}
-		}()
 		if err := p.WaitBootstrap(120 * time.Second); err != nil {
-			return fmt.Errorf("bootstrap: %w", err)
+			return fmt.Errorf("tunnel did not come up: %w\n\n%s", err, bootstrapHint(cfg))
 		}
 		prov, err := p.WaitWrapAProvision(30 * time.Second)
 		if err != nil {
@@ -307,7 +315,7 @@ func run(cfg *CLIConfig, logLevel int, captchaStdin bool) error {
 	log.Printf("waiting for tunnel to come up…")
 	if err := p.WaitBootstrap(120 * time.Second); err != nil {
 		dev.Close()
-		return fmt.Errorf("bootstrap: %w (VK captcha may be blocking; use the menu-bar agent, /solve, -captcha-stdin, or set cookie_header)", err)
+		return fmt.Errorf("tunnel did not come up: %w\n\n%s", err, bootstrapHint(cfg))
 	}
 	if ip := p.TURNServerIP(); ip != "" {
 		// Print the relay IP prominently: to keep egress DIRECT even if you run
@@ -478,6 +486,33 @@ func resolveVKHosts() map[string][]string {
 		}
 	}
 	return out
+}
+
+// bootstrapHint returns an actionable message for a bootstrap timeout. By this
+// point VK auth + the TURN allocation have (almost always) succeeded — the
+// failure is the DTLS/SRTP handshake to YOUR server *through* the relay timing
+// out, which means packets reach the VK relay but your server behind it never
+// completes the handshake. That's a server / peer_addr / mode problem, not a
+// SOCKS/Surge one.
+func bootstrapHint(cfg *CLIConfig) string {
+	mode := cfg.Mode
+	if mode == "" {
+		mode = "srtp"
+	}
+	return "The tunnel's handshake to your server timed out (VK auth + TURN relay were fine,\n" +
+		"but the DTLS/SRTP handshake to peer_addr never completed). Check, in order:\n" +
+		"  1. mode — must match how your server is running. mode=" + mode + " needs the\n" +
+		"     server started with -srtp; a legacy/WRAP/WRAP-A server (or SRTP on a\n" +
+		"     different port) fails exactly like this.\n" +
+		"  2. peer_addr=" + cfg.PeerAddr + " — must be your vk-turn-proxy server's -listen\n" +
+		"     IP:port (the SRTP listener), NOT the WireGuard port and NOT the TURN relay.\n" +
+		"  3. The server must be running and reachable from VK's relay; the firewall must\n" +
+		"     allow inbound to that IP:port.\n" +
+		"  4. Since your iOS app works with the same server, the surest fix is to copy its\n" +
+		"     exact settings: in the app make a connection link (or Export Full Backup) and\n" +
+		"     run  ./vk-turn-socks -import '<link-or-file>' -config config.json  (see docs/config.md).\n" +
+		"If VK forces an unsolvable captcha instead, use -captcha-stdin, the menu-bar agent,\n" +
+		"or set cookie_header."
 }
 
 func humanBytes(n int64) string {
