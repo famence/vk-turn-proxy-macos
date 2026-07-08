@@ -71,6 +71,11 @@ fi
 xcodebuild "${XCARGS[@]}" build
 
 APP="$DERIVED/Build/Products/Release/VK Turn Proxy Agent.app"
+if [[ ! -d "$APP" ]]; then
+  # Fall back to whatever .app the build produced (robust to a renamed product).
+  APP="$(/usr/bin/find "$DERIVED/Build/Products/Release" -maxdepth 1 -name '*.app' -print -quit || true)"
+fi
+[[ -d "$APP" ]] || { echo "ERROR: built app not found under $DERIVED/Build/Products/Release" >&2; exit 1; }
 echo
 echo "==> Done: $APP"
 echo

@@ -33,6 +33,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vkturnproxy.mac.agent
+        # Product (and thus the .app / menu title) is "VK Turn Proxy Agent"
+        # rather than the target name. The packaging scripts expect this name.
+        PRODUCT_NAME: "VK Turn Proxy Agent"
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: 1
         # NOT sandboxed: the agent launches the bundled vk-turn-socks binary as

@@ -28,8 +28,12 @@ mkdir -p "$DIST"
 echo "==> Building the menu-bar agent (universal)…"
 scripts/build_menubar.sh
 
-APP="$REPO_ROOT/build/DerivedData/Build/Products/Release/VK Turn Proxy Agent.app"
-[[ -d "$APP" ]] || { echo "ERROR: app not found at $APP" >&2; exit 1; }
+REL_DIR="$REPO_ROOT/build/DerivedData/Build/Products/Release"
+APP="$REL_DIR/VK Turn Proxy Agent.app"
+if [[ ! -d "$APP" ]]; then
+  APP="$(/usr/bin/find "$REL_DIR" -maxdepth 1 -name '*.app' -print -quit || true)"
+fi
+[[ -d "$APP" ]] || { echo "ERROR: built app not found under $REL_DIR" >&2; exit 1; }
 
 echo "==> Assembling DMG…"
 STAGE="$(mktemp -d)"
