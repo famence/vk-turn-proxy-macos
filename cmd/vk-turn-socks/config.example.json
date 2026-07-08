@@ -29,6 +29,9 @@
   "control_listen": "",
   "control_token": "",
 
+  "_bind_comment": "Surge Enhanced Mode (системный TUN): чтобы трафик сервиса не заворачивался сам в себя, укажите физический интерфейс (обычно en0 — Wi-Fi, en1 — Ethernet). Пусто = обычная маршрутизация. Альтернатива — правило в Surge PROCESS-NAME,vk-turn-socks,DIRECT (см. docs/automation.md).",
+  "bind_interface": "",
+
   "_cookie_comment": "Вход по cookie VK (remixsid=…; p=…). Если задан — используется только cookie-путь, без анонимного фолбэка (полезно, когда VK отключает анонимный вход и капча не решается).",
   "cookie_header": ""
 }

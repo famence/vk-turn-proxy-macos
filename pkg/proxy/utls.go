@@ -207,6 +207,8 @@ func dialBrowserTLS(ctx context.Context, network, addr string, forceH1 bool, hel
 		// stays well under the outer request budget.
 		Timeout:   8 * time.Second,
 		KeepAlive: 30 * time.Second,
+		// Bind to the configured physical interface (bypass a system TUN).
+		Control: socketControl(),
 	}
 
 	var rawConn net.Conn

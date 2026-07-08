@@ -3148,19 +3148,23 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 		return fmt.Errorf("resolve TURN: %w", err)
 	}
 
-	// Connect to TURN server
+	// Connect to TURN server. Control binds the socket to the configured
+	// physical interface (SetBindInterface) so it bypasses a system-wide TUN
+	// and can't loop back into a local proxy; nil = normal routing.
 	var turnConn net.PacketConn
 	if p.config.UseUDP {
-		udpConn, err := net.DialUDP("udp", nil, turnUDPAddr)
+		d := net.Dialer{Control: socketControl()}
+		c, err := d.Dial("udp", turnUDPAddr.String())
 		if err != nil {
 			return fmt.Errorf("dial TURN UDP: %w", err)
 		}
+		udpConn := c.(*net.UDPConn)
 		defer udpConn.Close()
 		turnConn = &connectedUDPConn{udpConn}
 	} else {
 		tcpCtx, tcpCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer tcpCancel()
-		var d net.Dialer
+		d := net.Dialer{Control: socketControl()}
 		tcpConn, err := d.DialContext(tcpCtx, "tcp", turnAddr)
 		if err != nil {
 			return fmt.Errorf("dial TURN TCP: %w", err)
@@ -4732,13 +4736,14 @@ func (p *Proxy) setupSRTPSession(ctx context.Context, turnAddr string, creds *TU
 	// transport plumbing.
 	var ctlConn net.PacketConn
 	if p.config.UseUDP {
-		uc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+		lc := net.ListenConfig{Control: socketControl()}
+		pc, err := lc.ListenPacket(ctx, "udp", ":0")
 		if err != nil {
 			return nil, fmt.Errorf("local udp listen: %w", err)
 		}
-		ctlConn = uc
+		ctlConn = pc
 	} else {
-		dialer := net.Dialer{Timeout: 5 * time.Second}
+		dialer := net.Dialer{Timeout: 5 * time.Second, Control: socketControl()}
 		tcp, err := dialer.Dial("tcp", turnAddr)
 		if err != nil {
 			return nil, fmt.Errorf("dial tcp to relay: %w", err)

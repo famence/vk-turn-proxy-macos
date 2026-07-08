@@ -74,6 +74,11 @@ type CLIConfig struct {
 	// stop) used by the menu-bar agent. 127.0.0.1 only.
 	ControlListen string `json:"control_listen,omitempty"`
 	ControlToken  string `json:"control_token,omitempty"`
+	// BindInterface pins all outbound engine sockets to this physical interface
+	// (e.g. "en0"), bypassing a system-wide TUN (Surge Enhanced Mode) so the
+	// engine's relay/API traffic can't be captured and looped back into the
+	// proxy. Empty = normal routing. macOS only.
+	BindInterface string `json:"bind_interface,omitempty"`
 	// Cookie (VKAuth) mode: a logged-in VK "Cookie:" header ("remixsid=…; p=…").
 	// When set, the engine uses ONLY the cookie cred path (no anonymous fallback),
 	// which keeps working when VK disables anonymous call-join.
@@ -238,6 +243,13 @@ func run(cfg *CLIConfig, logLevel int, captchaStdin bool) error {
 	}
 	if useWrapA && cfg.WrapAPassword == "" {
 		return errors.New("wrap_a_password is required in srtp-wrap-a mode")
+	}
+
+	// Optional: pin outbound sockets to a physical interface (bypass Surge's
+	// system TUN so the engine's own traffic doesn't loop back into us).
+	if cfg.BindInterface != "" {
+		proxy.SetBindInterface(cfg.BindInterface)
+		log.Printf("binding outbound sockets to interface %q (bypassing system TUN)", cfg.BindInterface)
 	}
 
 	// Cookie (VKAuth) mode: push the logged-in cookie into the engine before
