@@ -85,9 +85,11 @@ xattr -dr com.apple.quarantine ./dist/vk-turn-socks-darwin-arm64
 
 Возможности этого варианта:
 - **SOCKS5 TCP + UDP** (UDP ASSOCIATE — работает QUIC/HTTP3, DNS-over-UDP) и HTTP-прокси.
-- **Менюбар-агент** (`VK Turn Proxy Agent.app`) — статус/Start/Stop в строке меню; сборка `scripts/build_menubar.sh` (нужен только Go + Xcode CLT, без аккаунта Apple).
+- **Три способа запуска** — терминал, фоновый launchd-сервис ([`scripts/service.sh`](scripts/service.sh)) и **менюбар-агент со статистикой** (`VK Turn Proxy Agent.app`, `scripts/build_menubar.sh`). Подробно — [docs/automation.md](docs/automation.md).
+- **Авто-failover с Surge** — DIRECT пока прямой интернет жив, автоматически в туннель когда пропал, обратно на DIRECT когда вернулся (нативная `fallback`-группа Surge + режим Auto в агенте). См. [docs/automation.md](docs/automation.md#авто-failover-с-surge-direct--vk-turn).
 - **Ручное решение капчи** — авто по умолчанию; если не вышло, агент откроет WebView для ручного решения (или CLI `-captcha-stdin`, или вход по `cookie_header`).
 - **Прямой выход без петель** — сервис всегда ходит к VK TURN напрямую (userspace-прокси не меняет маршрутизацию; дайлер блокирует loopback/self). Для Surge в enhanced-mode добавьте `PROCESS-NAME,vk-turn-socks,DIRECT` + IP релея — подробности в [docs/socks.md](docs/socks.md#4-гарантия-прямого-выхода-нет-замыкания-на-себя).
+- **Стандартный путь конфига** — `~/Library/Application Support/VKTurnProxy/config.json` (общий для CLI, сервиса и агента).
 
 ## Документация
 
