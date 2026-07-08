@@ -2,16 +2,20 @@ import AppKit
 import Foundation
 
 // AgentController manages the `vk-turn-socks` subprocess and its localhost
-// control API. It owns:
-//   • starting/stopping the bundled binary with the user's config,
-//   • polling GET /status for live stats + a pending-captcha URL,
-//   • handing a solved captcha token back via POST /solve.
+// control API, and publishes live stats for the menu-bar dashboard.
 //
-// The config file lives at ~/Library/Application Support/VKTurnProxy/config.json.
-// On first launch, if it's missing, we copy the bundled config.example.json
-// there and reveal it so the user can fill it in.
+// It owns:
+//   • starting/stopping the bundled binary with the user's config,
+//   • polling GET /status for stats (conns, pool, traffic, relay, captcha),
+//   • deriving live up/down speed from traffic deltas,
+//   • an optional Auto mode: probe direct internet and start the tunnel only
+//     when the direct path is down, stop it when the direct path recovers.
+//
+// Config lives at ~/Library/Application Support/VKTurnProxy/config.json — the
+// SAME file the terminal CLI and the launchd service use.
 @MainActor
 final class AgentController: ObservableObject {
+    // Lifecycle / status
     @Published var isRunning = false
     @Published var statusLine = "Stopped"
     @Published var detail = ""
@@ -19,14 +23,54 @@ final class AgentController: ObservableObject {
     @Published var captchaPending = false
     @Published var captchaURL: URL?
 
-    // Control API: a random loopback port + bearer token chosen per launch, so
-    // nothing else on the machine can drive the engine.
+    // Live stats
+    @Published var activeConns: Int32 = 0
+    @Published var totalConns: Int32 = 0
+    @Published var poolFilled: Int32 = 0
+    @Published var poolWithCreds: Int32 = 0
+    @Published var poolSize: Int32 = 0
+    @Published var txBytes: Int64 = 0
+    @Published var rxBytes: Int64 = 0
+    @Published var txRate: Double = 0 // bytes/sec
+    @Published var rxRate: Double = 0 // bytes/sec
+    @Published var uptimeSec: Int64 = 0
+
+    // Auto mode (failover): when on, the agent starts the tunnel only while the
+    // direct internet path is down, and stops it when direct recovers.
+    @Published var autoMode: Bool = UserDefaults.standard.bool(forKey: "autoMode") {
+        didSet {
+            UserDefaults.standard.set(autoMode, forKey: "autoMode")
+            if autoMode {
+                startAutoProbe()
+            } else {
+                stopAutoProbe()
+            }
+        }
+    }
+    @Published var directOK = true // last direct-probe result (for the UI)
+
+    // Control API: random loopback port + bearer token per launch.
     private let controlPort = Int.random(in: 49_200...49_900)
     private let controlToken = UUID().uuidString
     private var controlBase: String { "http://127.0.0.1:\(controlPort)" }
 
     private var process: Process?
+    private var startedByAuto = false
     private var pollTimer: Timer?
+
+    // Speed derivation.
+    private var prevTx: Int64 = 0
+    private var prevRx: Int64 = 0
+    private var prevSample = Date()
+
+    // Auto-probe state.
+    private var probeTimer: Timer?
+    private var failStreak = 0
+    private var okStreak = 0
+    // Probe a captive-check endpoint. Force this host DIRECT in Surge so the
+    // probe reflects REAL direct connectivity even while the tunnel is up (see
+    // docs/automation.md). generate_204 returns 204 with an empty body.
+    private let probeURL = URL(string: "http://www.gstatic.com/generate_204")!
 
     private let fm = FileManager.default
 
@@ -37,19 +81,24 @@ final class AgentController: ObservableObject {
         return dir.appendingPathComponent("config.json")
     }
 
+    init() {
+        if autoMode { startAutoProbe() }
+    }
+
     var menuBarSymbol: String {
-        if captchaPending { return "hourglass" }
-        if isRunning && relayIP.isEmpty { return "hourglass" }
-        return isRunning ? "shield.lefthalf.filled" : "shield.slash"
+        if captchaPending { return "exclamationmark.shield.fill" }
+        if isRunning && activeConns > 0 { return "shield.lefthalf.filled" }
+        if isRunning { return "shield.lefthalf.filled" }
+        return "shield.slash"
     }
 
     // MARK: - Lifecycle
 
-    func start() {
+    func start() { startInternal(auto: false) }
+
+    private func startInternal(auto: Bool) {
         guard process == nil else { return }
 
-        // Ensure a config exists; if not, seed from the bundled example and
-        // stop so the user can edit it first.
         if !fm.fileExists(atPath: configURL.path) {
             if let example = Bundle.main.url(forResource: "config.example", withExtension: "json") {
                 try? fm.copyItem(at: example, to: configURL)
@@ -58,12 +107,10 @@ final class AgentController: ObservableObject {
             revealConfig()
             return
         }
-
         guard let binary = Bundle.main.url(forResource: "vk-turn-socks", withExtension: nil) else {
             detail = "Bundled vk-turn-socks binary missing from the app."
             return
         }
-        // Copying into Resources can drop the execute bit — restore it.
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
 
         let proc = Process()
@@ -73,7 +120,6 @@ final class AgentController: ObservableObject {
             "-control", "127.0.0.1:\(controlPort)",
             "-control-token", controlToken,
         ]
-        // Surface the engine's log in Console.app; the menu shows a summary.
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
         proc.terminationHandler = { [weak self] _ in
@@ -86,15 +132,17 @@ final class AgentController: ObservableObject {
             return
         }
         process = proc
+        startedByAuto = auto
         isRunning = true
         statusLine = "Connecting…"
         detail = ""
+        resetSpeed()
         startPolling()
     }
 
-    func stop() {
-        // Ask the engine to shut down gracefully via the control API, then
-        // fall back to terminating the process.
+    func stop() { stopInternal() }
+
+    private func stopInternal() {
         postControl("/stop")
         pollTimer?.invalidate()
         pollTimer = nil
@@ -104,34 +152,31 @@ final class AgentController: ObservableObject {
     }
 
     func quit() {
-        stop()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            NSApp.terminate(nil)
-        }
+        stopAutoProbe()
+        stopInternal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
 
     private func onProcessExit() {
         process = nil
+        startedByAuto = false
         isRunning = false
         captchaPending = false
         captchaURL = nil
         relayIP = ""
-        statusLine = "Stopped"
+        activeConns = 0; totalConns = 0
+        poolFilled = 0; poolWithCreds = 0; poolSize = 0
+        txBytes = 0; rxBytes = 0; txRate = 0; rxRate = 0
+        uptimeSec = 0
+        statusLine = autoMode ? "Auto: idle (direct OK)" : "Stopped"
         pollTimer?.invalidate()
         pollTimer = nil
     }
 
     // MARK: - Config helpers
 
-    func openConfig() {
-        seedConfigIfNeeded()
-        NSWorkspace.shared.open(configURL)
-    }
-
-    func revealConfig() {
-        seedConfigIfNeeded()
-        NSWorkspace.shared.activateFileViewerSelecting([configURL])
-    }
+    func openConfig() { seedConfigIfNeeded(); NSWorkspace.shared.open(configURL) }
+    func revealConfig() { seedConfigIfNeeded(); NSWorkspace.shared.activateFileViewerSelecting([configURL]) }
 
     private func seedConfigIfNeeded() {
         if !fm.fileExists(atPath: configURL.path),
@@ -141,6 +186,10 @@ final class AgentController: ObservableObject {
     }
 
     // MARK: - Control API polling
+
+    private func resetSpeed() {
+        prevTx = 0; prevRx = 0; prevSample = Date()
+    }
 
     private func startPolling() {
         pollTimer?.invalidate()
@@ -165,12 +214,29 @@ final class AgentController: ObservableObject {
 
     private func apply(_ s: Status) {
         relayIP = s.relay_ip
+        activeConns = s.active_conns
+        totalConns = s.total_conns
+        poolFilled = s.pool_filled
+        poolWithCreds = s.pool_with_creds
+        poolSize = s.pool_size
+        uptimeSec = s.uptime_sec
+
+        // Derive live speed from byte deltas.
+        let now = Date()
+        let dt = now.timeIntervalSince(prevSample)
+        if dt > 0.5 && prevTx > 0 {
+            txRate = max(0, Double(s.tx_bytes - prevTx) / dt)
+            rxRate = max(0, Double(s.rx_bytes - prevRx) / dt)
+        }
+        prevTx = s.tx_bytes; prevRx = s.rx_bytes; prevSample = now
+        txBytes = s.tx_bytes; rxBytes = s.rx_bytes
+
         if let ae = s.auth_error, !ae.isEmpty {
             statusLine = "VK session rejected — re-login"
             detail = ae
         } else if s.active_conns > 0 {
-            statusLine = "Connected · \(s.active_conns)/\(s.total_conns) conns"
-            detail = "↑ \(human(s.tx_bytes))  ↓ \(human(s.rx_bytes))  · pool \(s.pool_filled)/\(s.pool_with_creds)/\(s.pool_size)"
+            statusLine = "Connected"
+            detail = ""
         } else {
             statusLine = "Connecting…"
         }
@@ -187,14 +253,12 @@ final class AgentController: ObservableObject {
 
     // MARK: - Captcha
 
-    /// Called by the captcha WebView when it captures a success_token.
     func submitCaptcha(token: String) {
         postControl("/solve", query: [URLQueryItem(name: "token", value: token)])
         captchaPending = false
         captchaURL = nil
     }
 
-    /// Ask the engine for a fresh captcha URL (the pending one may be stale).
     func refreshCaptcha(_ completion: @escaping (URL?) -> Void) {
         var req = URLRequest(url: URL(string: "\(controlBase)/refresh_captcha")!)
         req.httpMethod = "POST"
@@ -204,6 +268,67 @@ final class AgentController: ObservableObject {
             let s = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             Task { @MainActor in completion(URL(string: s)) }
         }.resume()
+    }
+
+    // MARK: - Auto mode (direct-internet failover)
+
+    private func startAutoProbe() {
+        stopAutoProbe()
+        if !isRunning { statusLine = "Auto: idle (direct OK)" }
+        let t = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.probeDirect() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        probeTimer = t
+        probeDirect()
+    }
+
+    private func stopAutoProbe() {
+        probeTimer?.invalidate()
+        probeTimer = nil
+        failStreak = 0
+        okStreak = 0
+    }
+
+    /// Probe the direct internet path. The probe host MUST be forced DIRECT in
+    /// Surge (see docs/automation.md) so this reflects real direct connectivity
+    /// even while the tunnel is up. Ephemeral session, no caching, short timeout.
+    private func probeDirect() {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 4
+        cfg.timeoutIntervalForResource = 5
+        cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        cfg.allowsConstrainedNetworkAccess = true
+        let session = URLSession(configuration: cfg)
+        var req = URLRequest(url: probeURL)
+        req.httpMethod = "GET"
+        session.dataTask(with: req) { [weak self] _, response, error in
+            let ok = error == nil && (response as? HTTPURLResponse).map { (200...399).contains($0.statusCode) } ?? false
+            Task { @MainActor in self?.onProbeResult(ok: ok) }
+        }.resume()
+    }
+
+    private func onProbeResult(ok: Bool) {
+        guard autoMode else { return }
+        directOK = ok
+        if ok {
+            okStreak += 1; failStreak = 0
+            // Direct recovered — stop the auto-started tunnel after a couple of
+            // confirmations (hysteresis) so a single blip doesn't flap it.
+            if isRunning && startedByAuto && okStreak >= 3 {
+                statusLine = "Auto: direct recovered — stopping tunnel"
+                stopInternal()
+            } else if !isRunning {
+                statusLine = "Auto: idle (direct OK)"
+            }
+        } else {
+            failStreak += 1; okStreak = 0
+            // Direct down — bring the tunnel up after 2 consecutive failures.
+            if !isRunning && failStreak >= 2 {
+                statusLine = "Auto: direct down — starting tunnel"
+                startInternal(auto: true)
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -216,14 +341,6 @@ final class AgentController: ObservableObject {
         req.timeoutInterval = 5
         req.setValue("Bearer \(controlToken)", forHTTPHeaderField: "Authorization")
         URLSession.shared.dataTask(with: req).resume()
-    }
-
-    private func human(_ n: Int64) -> String {
-        let f = Double(n)
-        if f >= 1 << 30 { return String(format: "%.1fGB", f / Double(1 << 30)) }
-        if f >= 1 << 20 { return String(format: "%.1fMB", f / Double(1 << 20)) }
-        if f >= 1 << 10 { return String(format: "%.1fKB", f / Double(1 << 10)) }
-        return "\(n)B"
     }
 }
 
