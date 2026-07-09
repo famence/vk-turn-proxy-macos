@@ -1,11 +1,10 @@
 import SwiftUI
 
 // The menu-bar popover: status, a connect/disconnect (or Auto) control, and a
-// compact live-stats panel (connections, pool, traffic, speed, uptime, relay).
+// compact live-stats panel (connections, pool, traffic, speed, uptime).
 struct DashboardView: View {
     @ObservedObject var controller: AgentController
     @Environment(\.openWindow) private var openWindow
-    @State private var showRelayHint = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -100,9 +99,6 @@ struct DashboardView: View {
                         help: "Ready / with credentials / capacity.")
                 statDivider()
                 infoRow("Uptime", uptime(controller.uptimeSec), help: nil)
-                statDivider()
-                relayRow
-                if showRelayHint { relayHint }
             }
         }
     }
@@ -147,7 +143,7 @@ struct DashboardView: View {
     }
 
     private func speedTile(title: String, symbol: String, rate: String, total: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .center, spacing: 5) {
             HStack(spacing: 4) {
                 Image(systemName: symbol)
                     .font(.caption2.weight(.semibold))
@@ -161,12 +157,14 @@ struct DashboardView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.center)
             Text(total)
                 .font(.caption2)
                 .monospacedDigit()
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .center)
         .padding(.vertical, 9)
         .padding(.horizontal, 11)
         .background(
@@ -198,52 +196,6 @@ struct DashboardView: View {
         .help(help ?? "")
     }
 
-    private var relayRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            HStack(spacing: 4) {
-                Text("Relay")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { showRelayHint.toggle() }
-                } label: {
-                    Image(systemName: showRelayHint ? "info.circle.fill" : "info.circle")
-                        .font(.caption)
-                        .foregroundColor(showRelayHint ? .accentColor : .secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Почему релей должен идти DIRECT в Surge")
-            }
-            Spacer(minLength: 8)
-            Text(controller.relayIP.isEmpty ? "—" : controller.relayIP)
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var relayHint: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Служебный трафик к VK TURN — только DIRECT, иначе петля.")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            Text("IP-CIDR,\(controller.relayIP.isEmpty ? "<relay>" : controller.relayIP)/32,DIRECT")
-                .font(.caption2.monospaced())
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
-        )
-        .padding(.bottom, 4)
-        .transition(.opacity)
-    }
-
     private var statusColor: Color {
         if controller.captchaPending { return .orange }
         if controller.isRunning { return controller.activeConns > 0 ? .green : .yellow }
@@ -260,6 +212,7 @@ struct DashboardView: View {
 
     private func bytes(_ n: Int64) -> String {
         let f = Double(n)
+        if f >= 1_099_511_627_776 { return String(format: "%.1f TB", f / 1_099_511_627_776) }
         if f >= 1_073_741_824 { return String(format: "%.1f GB", f / 1_073_741_824) }
         if f >= 1_048_576 { return String(format: "%.1f MB", f / 1_048_576) }
         if f >= 1024 { return String(format: "%.0f KB", f / 1024) }
