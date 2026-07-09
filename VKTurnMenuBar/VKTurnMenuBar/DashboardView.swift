@@ -143,7 +143,7 @@ struct DashboardView: View {
     }
 
     private func speedTile(title: String, symbol: String, rate: String, total: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .center, spacing: 5) {
             HStack(spacing: 4) {
                 Image(systemName: symbol)
                     .font(.caption2.weight(.semibold))
@@ -157,12 +157,14 @@ struct DashboardView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.center)
             Text(total)
                 .font(.caption2)
                 .monospacedDigit()
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .center)
         .padding(.vertical, 9)
         .padding(.horizontal, 11)
         .background(
@@ -210,6 +212,7 @@ struct DashboardView: View {
 
     private func bytes(_ n: Int64) -> String {
         let f = Double(n)
+        if f >= 1_099_511_627_776 { return String(format: "%.1f TB", f / 1_099_511_627_776) }
         if f >= 1_073_741_824 { return String(format: "%.1f GB", f / 1_073_741_824) }
         if f >= 1_048_576 { return String(format: "%.1f MB", f / 1_048_576) }
         if f >= 1024 { return String(format: "%.0f KB", f / 1024) }
