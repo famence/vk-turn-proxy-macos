@@ -1,14 +1,13 @@
 import SwiftUI
 
 // The menu-bar popover: status, a connect/disconnect (or Auto) control, and a
-// compact live-stats panel (connections, pool, traffic, speed, uptime, relay).
+// compact live-stats panel (connections, pool, traffic, speed, uptime).
 struct DashboardView: View {
     @ObservedObject var controller: AgentController
     @Environment(\.openWindow) private var openWindow
-    @State private var showRelayHint = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
             if controller.captchaPending {
@@ -34,22 +33,20 @@ struct DashboardView: View {
             footer
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 340)
     }
 
     // MARK: - Sections
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Circle()
                 .fill(statusColor)
-                .frame(width: 12, height: 12)
-                .shadow(color: statusColor.opacity(0.55), radius: 5)
+                .frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 2) {
-                Text("VK Turn Proxy")
-                    .font(.system(size: 17, weight: .semibold))
+                Text("VK Turn Proxy").font(.headline)
                 Text(controller.statusLine)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
             }
@@ -59,7 +56,6 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var controls: some View {
-        // Auto mode owns the lifecycle when enabled; otherwise a manual toggle.
         switchRow(title: "Auto (failover)",
                   subtitle: "Run only when direct internet is down",
                   isOn: $controller.autoMode)
@@ -70,7 +66,6 @@ struct DashboardView: View {
             } label: {
                 Label(controller.isRunning ? "Disconnect" : "Connect",
                       systemImage: controller.isRunning ? "stop.circle" : "play.circle")
-                    .font(.system(size: 15, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -85,10 +80,8 @@ struct DashboardView: View {
     }
 
     private var stats: some View {
-        VStack(spacing: 14) {
-            // Hero: live speed. Two equal-width tiles with a light gradient and a
-            // large, easy-to-read rate.
-            HStack(spacing: 10) {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
                 speedTile(title: "Download", symbol: "arrow.down",
                           rate: speed(controller.rxRate), total: bytes(controller.rxBytes),
                           tint: .blue)
@@ -97,25 +90,15 @@ struct DashboardView: View {
                           tint: .green)
             }
 
-            // Details: borderless table — label left, value right.
             VStack(spacing: 0) {
-                infoRow("Connections",
-                        "\(controller.activeConns) / \(controller.totalConns)",
-                        detail: "active / total",
+                infoRow("Connections", "\(controller.activeConns) / \(controller.totalConns)",
                         help: "Active / total proxy sessions.")
-                Divider().opacity(0.25)
-                infoRow("Credential pool",
+                statDivider()
+                infoRow("Pool",
                         "\(controller.poolFilled) / \(controller.poolWithCreds) / \(controller.poolSize)",
-                        detail: "ready / credentials / capacity",
-                        help: "Ready / with-credentials / capacity.")
-                Divider().opacity(0.25)
-                infoRow("Uptime", uptime(controller.uptimeSec),
-                        detail: "current session", help: nil)
-                Divider().opacity(0.25)
-                relayRow
-                if showRelayHint {
-                    relayHint
-                }
+                        help: "Ready / with credentials / capacity.")
+                statDivider()
+                infoRow("Uptime", uptime(controller.uptimeSec), help: nil)
             }
         }
     }
@@ -140,16 +123,12 @@ struct DashboardView: View {
 
     // MARK: - Reusable bits
 
-    /// A label on the left and a switch pinned to the right.
     private func switchRow(title: String, subtitle: String?, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 15, weight: .medium))
                 if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+                    Text(subtitle).font(.caption2).foregroundColor(.secondary)
                 }
             }
             Spacer(minLength: 12)
@@ -157,150 +136,62 @@ struct DashboardView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
         }
-        .padding(.vertical, 1)
     }
 
-    /// A live-speed tile: label, big rate, and a session total below. Filled with
-    /// a light diagonal gradient in `tint` so the pair reads at a glance.
+    private func statDivider() -> some View {
+        Divider().opacity(0.22).padding(.vertical, 2)
+    }
+
     private func speedTile(title: String, symbol: String, rate: String, total: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundColor(tint)
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
             Text(rate)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .lineLimit(1).minimumScaleFactor(0.5)
-            HStack(spacing: 6) {
-                Text("Session")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.8))
-                Spacer(minLength: 4)
-                Text(total)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(.secondary)
-            }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(total)
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundColor(.secondary)
         }
-        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-        .padding(.vertical, 11)
-        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 11)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(LinearGradient(colors: [tint.opacity(0.17), tint.opacity(0.045)],
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(LinearGradient(colors: [tint.opacity(0.14), tint.opacity(0.04)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(tint.opacity(0.18), lineWidth: 0.75)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(tint.opacity(0.14), lineWidth: 0.5)
         )
     }
 
-    /// A borderless table row: label on the left, value pinned to the right.
-    private func infoRow(_ label: String, _ value: String, detail: String?, help: String?) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-                if let detail {
-                    Text(detail)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary.opacity(0.72))
-                }
-            }
-            Spacer(minLength: 10)
+    /// Label left (small), value right (slightly larger) — one calm step apart.
+    private func infoRow(_ label: String, _ value: String, help: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 8)
             Text(value)
-                .font(.system(size: 21, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.8)
         }
-        .frame(minHeight: 50)
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .help(help ?? "")
-    }
-
-    private var relayRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text("VK TURN relay")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.secondary)
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            showRelayHint.toggle()
-                        }
-                    } label: {
-                        Image(systemName: showRelayHint ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(showRelayHint ? .accentColor : .secondary.opacity(0.7))
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Почему соединение с релеем должно идти DIRECT")
-                }
-                Text("service connection")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.72))
-            }
-            Spacer(minLength: 10)
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(controller.relayIP.isEmpty ? "—" : controller.relayIP)
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text("DIRECT")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.green)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(Color.green.opacity(0.12))
-                    )
-            }
-        }
-        .frame(minHeight: 54)
-        .padding(.vertical, 3)
-    }
-
-    private var relayHint: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.accentColor)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Why DIRECT?")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Служебное соединение с VK TURN должно обходить прокси, иначе трафик зациклится.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("IP-CIDR,\(controller.relayIP.isEmpty ? "<relay>" : controller.relayIP)/32,DIRECT")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(0.08))
-        )
-        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private var statusColor: Color {
