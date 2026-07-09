@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -7,7 +8,9 @@ struct LogsWindow: View {
     @ObservedObject var controller: AgentController
     @State private var text = ""
     @State private var autoScroll = true
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var pollTimer: Timer?
+    @State private var isVisible = false
+    private let pollInterval: TimeInterval = 1.0
     private let maxTailBytes = 256 * 1024
 
     var body: some View {
@@ -46,39 +49,37 @@ struct LogsWindow: View {
         }
         .frame(minWidth: 620, minHeight: 420)
         .onAppear {
-            text = tailText(at: controller.logURL, maxBytes: maxTailBytes)
+            isVisible = true
+            refreshLogTail()
+            startLogPolling()
         }
-        .onReceive(timer) { _ in
-            let url = controller.logURL
-            Task {
-                let latest = await Task.detached(priority: .utility) {
-                    tailText(at: url, maxBytes: maxTailBytes)
-                }.value
-                if latest != text { text = latest }
-            }
+        .onDisappear {
+            isVisible = false
+            stopLogPolling()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard isVisible else { return }
+            refreshLogTail()
+            startLogPolling()
         }
     }
 
-    private func tailText(at url: URL, maxBytes: Int) -> String {
-        guard maxBytes > 0 else { return "" }
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let sizeAny = attrs[.size],
-              let size = sizeAny as? NSNumber else {
-            return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    private func startLogPolling() {
+        pollTimer?.invalidate()
+        let timer = Timer(timeInterval: pollInterval, repeats: true) { _ in
+            refreshLogTail()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
 
-        let fileSize = size.int64Value
-        if fileSize <= 0 { return "" }
-        let start = max(Int64(0), fileSize - Int64(maxBytes))
+    private func stopLogPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
 
-        guard let h = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? h.close() }
-        do {
-            try h.seek(toOffset: UInt64(start))
-            let data = try h.readToEnd() ?? Data()
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            return ""
-        }
+    private func refreshLogTail() {
+        let latest = controller.readLogTail(maxBytes: maxTailBytes)
+        if latest != text { text = latest }
     }
 }

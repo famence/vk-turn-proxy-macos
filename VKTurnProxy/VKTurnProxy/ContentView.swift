@@ -1898,7 +1898,9 @@ struct LogsView: View {
     @State private var fallbackText: String = ""
     @State private var fallbackFetchedAt: Date = .distantPast
     @State private var fallbackInFlight = false
-    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    @State private var pollTimer: Timer?
+    @State private var isVisible = false
+    private let pollInterval: TimeInterval = 2.0
     private let fallbackTTL: TimeInterval = 4.0
 
     /// Maximum characters to display — keeps UI responsive.
@@ -1950,8 +1952,37 @@ struct LogsView: View {
             .padding(.vertical, 8)
         }
         .navigationTitle("Logs")
-        .onAppear { loadLogs() }
-        .onReceive(timer) { _ in loadLogs() }
+        .onAppear {
+            isVisible = true
+            loadLogs()
+            startLogPolling()
+        }
+        .onDisappear {
+            isVisible = false
+            stopLogPolling()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard isVisible else { return }
+            loadLogs()
+            // Timer.publish autoconnect() stops firing when the app is
+            // backgrounded; an explicit .common RunLoop timer can too.
+            // Restart on foreground so the open Logs screen keeps updating.
+            startLogPolling()
+        }
+    }
+
+    private func startLogPolling() {
+        pollTimer?.invalidate()
+        let timer = Timer(timeInterval: pollInterval, repeats: true) { _ in
+            loadLogs()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+
+    private func stopLogPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
     private func loadLogs() {
@@ -2016,6 +2047,9 @@ struct LogsView: View {
         fallbackInFlight = true
 
         Task.detached(priority: .userInitiated) {
+            defer {
+                Task { @MainActor in fallbackInFlight = false }
+            }
             // OSLogReader.readOwnLogs is the heavy synchronous call —
             // running it on a detached task moves it off the main thread.
             // Subsequent awaits (providerMessage, MainActor.run) come
@@ -2059,7 +2093,6 @@ struct LogsView: View {
             await MainActor.run {
                 fallbackText = combined
                 fallbackFetchedAt = Date()
-                fallbackInFlight = false
                 if usingOSLogFallback {
                     logText = truncated(combined)
                 }
